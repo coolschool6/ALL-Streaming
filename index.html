@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ALLStreaming - Access Gate</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔒</text></svg>">
+</head>
+<body>
+
+  <!-- STATE 1: ACCESS KEY GATE -->
+  <div id="gate-view" class="view active">
+    <div class="gate-card">
+      <div class="lock-icon">🔒</div>
+      <h1>ALLStreaming</h1>
+      <p class="subtitle">Enter your access key to continue</p>
+      <form id="gate-form">
+        <div class="input-group">
+          <label for="key-input">Access Key</label>
+          <input
+            type="text"
+            id="key-input"
+            placeholder="e.g. KEY-USER1-30"
+            autocomplete="off"
+            spellcheck="false"
+            autofocus
+          >
+        </div>
+        <button type="submit" class="btn-unlock">Unlock Platform</button>
+      </form>
+      <div id="error-msg" class="error-msg">
+        Invalid or expired access key. Please check and try again.
+      </div>
+    </div>
+  </div>
+
+  <!-- STATE 2: EMBEDDED PLATFORM -->
+  <div id="platform-view" class="view">
+    <div class="overlay-bar">
+      <span class="days-left"><strong id="days-left">0</strong> days remaining</span>
+      <button id="btn-logout" class="btn-logout">Logout</button>
+    </div>
+    <iframe id="platform-frame" allowfullscreen></iframe>
+  </div>
+
+  <!-- STATE 3: EXPIRED ACCESS -->
+  <div id="expired-view" class="view">
+    <div class="expired-card">
+      <div class="expired-icon">⛔</div>
+      <h1>Access Expired</h1>
+      <p class="expired-detail">
+        Your access period has been reached.<br>
+        Contact the platform owner for a new key.
+      </p>
+      <div class="contact-info">
+        <strong>Need a new key?</strong><br>
+        Reach out to the administrator to request<br>
+        a renewed access key.
+      </div>
+      <button id="btn-retry" class="btn-retry">Try Another Key</button>
+    </div>
+  </div>
+
+  <script src="keys.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
