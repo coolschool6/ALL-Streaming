@@ -10,7 +10,6 @@
   const keyInput = document.getElementById('key-input');
   const errorMsg = document.getElementById('error-msg');
   const daysLeftEl = document.getElementById('days-left');
-  const platformFrame = document.getElementById('platform-frame');
 
   function showView(view) {
     [gateView, platformView, expiredView].forEach(v => v.classList.remove('active'));
@@ -59,9 +58,8 @@
     localStorage.removeItem(SESSION_KEY);
   }
 
-  function loadPlatform(session) {
+  function showGranted(session) {
     daysLeftEl.textContent = session.remaining;
-    platformFrame.src = TARGET_URL;
     showView(platformView);
   }
 
@@ -92,7 +90,7 @@
       return;
     }
     saveSession(keyObj, remaining);
-    loadPlatform({ remaining, keyObj });
+    showGranted({ remaining });
   }
 
   function checkExistingSession() {
@@ -112,11 +110,11 @@
       handleExpired();
       return;
     }
-    loadPlatform({ remaining });
+    saveSession(keyObj, remaining);
+    showGranted({ remaining });
   }
 
   function handleLogout() {
-    platformFrame.src = 'about:blank';
     clearSession();
     keyInput.value = '';
     hideError();
@@ -133,6 +131,10 @@
       return;
     }
     attemptLogin(val);
+  });
+
+  document.getElementById('btn-launch').addEventListener('click', function () {
+    window.open(TARGET_URL, '_blank', 'noopener,noreferrer');
   });
 
   document.getElementById('btn-logout').addEventListener('click', handleLogout);

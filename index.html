@@ -35,13 +35,25 @@
     </div>
   </div>
 
-  <!-- STATE 2: EMBEDDED PLATFORM -->
+  <!-- STATE 2: ACCESS GRANTED -->
   <div id="platform-view" class="view">
-    <div class="overlay-bar">
-      <span class="days-left"><strong id="days-left">0</strong> days remaining</span>
-      <button id="btn-logout" class="btn-logout">Logout</button>
+    <div class="gate-card">
+      <div class="lock-icon">✅</div>
+      <h1>Access Granted</h1>
+      <p class="subtitle">Your key is valid and active</p>
+      <div class="session-info">
+        <div class="info-row">
+          <span class="info-label">Days Remaining</span>
+          <span class="info-value" id="days-left">0</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Status</span>
+          <span class="info-value active-status">Active</span>
+        </div>
+      </div>
+      <button id="btn-launch" class="btn-unlock">Launch ALLStreaming</button>
+      <button id="btn-logout" class="btn-logout-card">Logout</button>
     </div>
-    <iframe id="platform-frame" allowfullscreen></iframe>
   </div>
 
   <!-- STATE 3: EXPIRED ACCESS -->
