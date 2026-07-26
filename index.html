@@ -9,7 +9,6 @@
 </head>
 <body>
 
-  <!-- STATE 1: ACCESS KEY GATE -->
   <div id="gate-view" class="view active">
     <div class="gate-card">
       <div class="lock-icon">🔒</div>
@@ -27,7 +26,7 @@
             autofocus
           >
         </div>
-        <button type="submit" class="btn-unlock">Unlock Platform</button>
+        <button type="submit" class="btn-primary">Unlock Platform</button>
       </form>
       <div id="error-msg" class="error-msg">
         Invalid or expired access key. Please check and try again.
@@ -35,7 +34,6 @@
     </div>
   </div>
 
-  <!-- STATE 2: EXPIRED ACCESS -->
   <div id="expired-view" class="view">
     <div class="expired-card">
       <div class="expired-icon">⛔</div>
@@ -49,7 +47,7 @@
         Reach out to the administrator to request<br>
         a renewed access key.
       </div>
-      <button id="btn-retry" class="btn-retry">Try Another Key</button>
+      <button id="btn-retry" class="btn-outline">Try Another Key</button>
     </div>
   </div>
 

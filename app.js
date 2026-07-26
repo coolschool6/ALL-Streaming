@@ -1,52 +1,52 @@
 (function () {
   'use strict';
 
-  const SESSION_KEY = 'ak_session';
-  const TARGET_URL = '/watch';
+  var SESSION_KEY = 'ak_session';
+  var TARGET_URL = 'https://dulo.tv/';
 
-  const gateView = document.getElementById('gate-view');
-  const expiredView = document.getElementById('expired-view');
-  const keyInput = document.getElementById('key-input');
-  const errorMsg = document.getElementById('error-msg');
+  var gateView = document.getElementById('gate-view');
+  var expiredView = document.getElementById('expired-view');
+  var keyInput = document.getElementById('key-input');
+  var errorMsg = document.getElementById('error-msg');
 
   function showView(view) {
-    [gateView, expiredView].forEach(v => v.classList.remove('active'));
+    gateView.classList.remove('active');
+    expiredView.classList.remove('active');
     view.classList.add('active');
   }
 
   function calcRemainingDays(keyObj) {
-    const created = new Date(keyObj.createdAt);
-    const expiry = new Date(created);
+    var created = new Date(keyObj.createdAt + 'T00:00:00');
+    var expiry = new Date(created);
     expiry.setDate(expiry.getDate() + keyObj.validDays);
-    const today = new Date();
+    var today = new Date();
     today.setHours(0, 0, 0, 0);
     expiry.setHours(0, 0, 0, 0);
-    const diffMs = expiry.getTime() - today.getTime();
-    return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+    return Math.ceil((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
   }
 
   function findKey(inputKey) {
-    const trimmed = inputKey.trim().toUpperCase();
-    return ACCESS_KEYS.find(k => k.key.toUpperCase() === trimmed);
+    var trimmed = inputKey.trim().toUpperCase();
+    for (var i = 0; i < ACCESS_KEYS.length; i++) {
+      if (ACCESS_KEYS[i].key.toUpperCase() === trimmed) return ACCESS_KEYS[i];
+    }
+    return null;
   }
 
   function saveSession(keyObj, remaining) {
-    const session = {
+    localStorage.setItem(SESSION_KEY, JSON.stringify({
       key: keyObj.key,
-      userNote: keyObj.userNote,
       validDays: keyObj.validDays,
       createdAt: keyObj.createdAt,
       remaining: remaining,
       loginAt: new Date().toISOString()
-    };
-    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+    }));
   }
 
   function getSession() {
     try {
-      const raw = localStorage.getItem(SESSION_KEY);
-      if (!raw) return null;
-      return JSON.parse(raw);
+      var raw = localStorage.getItem(SESSION_KEY);
+      return raw ? JSON.parse(raw) : null;
     } catch (e) {
       return null;
     }
@@ -56,11 +56,7 @@
     localStorage.removeItem(SESSION_KEY);
   }
 
-  function handleExpired() {
-    showView(expiredView);
-  }
-
-  function handleInvalid() {
+  function showError() {
     errorMsg.classList.add('visible');
     keyInput.value = '';
     keyInput.focus();
@@ -71,15 +67,15 @@
   }
 
   function attemptLogin(inputKey) {
-    const keyObj = findKey(inputKey);
+    var keyObj = findKey(inputKey);
     if (!keyObj) {
-      handleInvalid();
+      showError();
       return;
     }
-    const remaining = calcRemainingDays(keyObj);
+    var remaining = calcRemainingDays(keyObj);
     if (remaining <= 0) {
       saveSession(keyObj, 0);
-      handleExpired();
+      showView(expiredView);
       return;
     }
     saveSession(keyObj, remaining);
@@ -100,10 +96,9 @@
     }
     var remaining = calcRemainingDays(keyObj);
     if (remaining <= 0) {
-      handleExpired();
+      showView(expiredView);
       return;
     }
-    saveSession(keyObj, remaining);
     window.location.href = TARGET_URL;
   }
 
