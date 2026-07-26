@@ -5,14 +5,12 @@
   const TARGET_URL = 'https://dulo.tv/';
 
   const gateView = document.getElementById('gate-view');
-  const platformView = document.getElementById('platform-view');
   const expiredView = document.getElementById('expired-view');
   const keyInput = document.getElementById('key-input');
   const errorMsg = document.getElementById('error-msg');
-  const daysLeftEl = document.getElementById('days-left');
 
   function showView(view) {
-    [gateView, platformView, expiredView].forEach(v => v.classList.remove('active'));
+    [gateView, expiredView].forEach(v => v.classList.remove('active'));
     view.classList.add('active');
   }
 
@@ -58,11 +56,6 @@
     localStorage.removeItem(SESSION_KEY);
   }
 
-  function showGranted(session) {
-    daysLeftEl.textContent = session.remaining;
-    showView(platformView);
-  }
-
   function handleExpired() {
     showView(expiredView);
   }
@@ -90,42 +83,34 @@
       return;
     }
     saveSession(keyObj, remaining);
-    showGranted({ remaining });
+    window.location.href = TARGET_URL;
   }
 
   function checkExistingSession() {
-    const session = getSession();
+    var session = getSession();
     if (!session) {
       showView(gateView);
       return;
     }
-    const keyObj = findKey(session.key);
+    var keyObj = findKey(session.key);
     if (!keyObj) {
       clearSession();
       showView(gateView);
       return;
     }
-    const remaining = calcRemainingDays(keyObj);
+    var remaining = calcRemainingDays(keyObj);
     if (remaining <= 0) {
       handleExpired();
       return;
     }
     saveSession(keyObj, remaining);
-    showGranted({ remaining });
-  }
-
-  function handleLogout() {
-    clearSession();
-    keyInput.value = '';
-    hideError();
-    showView(gateView);
-    keyInput.focus();
+    window.location.href = TARGET_URL;
   }
 
   document.getElementById('gate-form').addEventListener('submit', function (e) {
     e.preventDefault();
     hideError();
-    const val = keyInput.value.trim();
+    var val = keyInput.value.trim();
     if (!val) {
       keyInput.focus();
       return;
@@ -133,11 +118,6 @@
     attemptLogin(val);
   });
 
-  document.getElementById('btn-launch').addEventListener('click', function () {
-    window.open(TARGET_URL, '_blank', 'noopener,noreferrer');
-  });
-
-  document.getElementById('btn-logout').addEventListener('click', handleLogout);
   document.getElementById('btn-retry').addEventListener('click', function () {
     keyInput.value = '';
     hideError();
