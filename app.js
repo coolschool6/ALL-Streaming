@@ -2,7 +2,7 @@
   'use strict';
 
   const SESSION_KEY = 'ak_session';
-  const TARGET_URL = 'https://dulo.tv/';
+  const TARGET_URL = '/watch';
 
   const gateView = document.getElementById('gate-view');
   const expiredView = document.getElementById('expired-view');

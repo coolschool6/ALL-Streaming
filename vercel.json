@@ -1,0 +1,13 @@
+{
+  "rewrites": [
+    { "source": "/assets/:path*", "destination": "https://dulo.tv/assets/:path*" },
+    { "source": "/api/:path*", "destination": "https://dulo.tv/api/:path*" },
+    { "source": "/cdn-cgi/:path*", "destination": "https://dulo.tv/cdn-cgi/:path*" },
+    { "source": "/streaming-logos/:path*", "destination": "https://dulo.tv/streaming-logos/:path*" },
+    { "source": "/favicon.svg", "destination": "https://dulo.tv/favicon.svg" },
+    { "source": "/favicon.png", "destination": "https://dulo.tv/favicon.png" },
+    { "source": "/apple-touch-icon.png", "destination": "https://dulo.tv/apple-touch-icon.png" },
+    { "source": "/watch", "destination": "/api/proxy" },
+    { "source": "/watch/:path*", "destination": "/api/proxy?path=:path*" }
+  ]
+}
