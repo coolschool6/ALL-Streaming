@@ -110,7 +110,7 @@
   document.getElementById('gate-form').addEventListener('submit', function (e) {
     e.preventDefault();
     hideError();
-    var val = keyInput.value.trim();
+    var val = keyInput.value;
     if (!val) {
       keyInput.focus();
       return;
