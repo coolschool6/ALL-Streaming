@@ -1,14 +1,7 @@
 const crypto = require('crypto');
+const keys = require('../keys.json');
 
 const SECRET = process.env.SESSION_SECRET || 'allstreaming-default-secret-change-me';
-
-function getKeys() {
-  try {
-    return JSON.parse(process.env.ACCESS_KEYS || '[]');
-  } catch (e) {
-    return [];
-  }
-}
 
 function sign(payload) {
   return crypto.createHmac('sha256', SECRET).update(payload).digest('hex');
@@ -34,8 +27,6 @@ module.exports = async function (req, res) {
 
   var body = req.body;
   if (!body || !body.action) return res.status(400).json({ error: 'Missing action' });
-
-  var keys = getKeys();
 
   if (body.action === 'validate-key') {
     var inputKey = (body.key || '').trim().toUpperCase();
