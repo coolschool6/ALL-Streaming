@@ -23,8 +23,16 @@
     keyInput.focus();
   }
 
+  function showErrorMessage(text) {
+    errorMsg.textContent = text;
+    errorMsg.classList.add('visible');
+    keyInput.value = '';
+    keyInput.focus();
+  }
+
   function hideError() {
     errorMsg.classList.remove('visible');
+    errorMsg.textContent = 'Invalid or expired access key. Please check and try again.';
   }
 
   function showStatus(text) {
@@ -85,10 +93,18 @@
         saveSession(result.token);
         showStatus('Activated on ' + new Date(result.activatedAt).toLocaleString() + '. Days remaining: ' + result.remaining + '.');
       } else {
-        showError();
+        if (result.error === 'expired') {
+          showErrorMessage('This key has already started and its time period has ended.');
+        } else if (result.error === 'Invalid key') {
+          showErrorMessage('That key does not match exactly. Check spelling, case, and spaces.');
+        } else if (result.error === 'Invalid key configuration') {
+          showErrorMessage('This key is misconfigured in keys.json.');
+        } else {
+          showError();
+        }
       }
     } catch (e) {
-      showError();
+      showErrorMessage('The validation service is not reachable. Make sure the app is running with the /api/validate endpoint.');
     } finally {
       setLoading(btn, false);
     }
