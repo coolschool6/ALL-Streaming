@@ -3,6 +3,7 @@
 
   var SESSION_KEY = 'ak_session';
   var TARGET_URL = 'https://dulo.tv/';
+  var API_URL = '/api/validate';
 
   var gateView = document.getElementById('gate-view');
   var expiredView = document.getElementById('expired-view');
@@ -15,47 +16,6 @@
     view.classList.add('active');
   }
 
-  function calcRemainingDays(keyObj) {
-    var created = new Date(keyObj.createdAt + 'T00:00:00');
-    var expiry = new Date(created);
-    expiry.setDate(expiry.getDate() + keyObj.validDays);
-    var today = new Date();
-    today.setHours(0, 0, 0, 0);
-    expiry.setHours(0, 0, 0, 0);
-    return Math.ceil((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-  }
-
-  function findKey(inputKey) {
-    var trimmed = inputKey.trim().toUpperCase();
-    for (var i = 0; i < ACCESS_KEYS.length; i++) {
-      if (ACCESS_KEYS[i].key.toUpperCase() === trimmed) return ACCESS_KEYS[i];
-    }
-    return null;
-  }
-
-  function saveSession(keyObj, remaining) {
-    localStorage.setItem(SESSION_KEY, JSON.stringify({
-      key: keyObj.key,
-      validDays: keyObj.validDays,
-      createdAt: keyObj.createdAt,
-      remaining: remaining,
-      loginAt: new Date().toISOString()
-    }));
-  }
-
-  function getSession() {
-    try {
-      var raw = localStorage.getItem(SESSION_KEY);
-      return raw ? JSON.parse(raw) : null;
-    } catch (e) {
-      return null;
-    }
-  }
-
-  function clearSession() {
-    localStorage.removeItem(SESSION_KEY);
-  }
-
   function showError() {
     errorMsg.classList.add('visible');
     keyInput.value = '';
@@ -66,40 +26,85 @@
     errorMsg.classList.remove('visible');
   }
 
-  function attemptLogin(inputKey) {
-    var keyObj = findKey(inputKey);
-    if (!keyObj) {
-      showError();
-      return;
+  function setLoading(btn, loading) {
+    if (loading) {
+      btn.disabled = true;
+      btn.dataset.originalText = btn.textContent;
+      btn.textContent = 'Verifying...';
+    } else {
+      btn.disabled = false;
+      btn.textContent = btn.dataset.originalText || btn.textContent;
     }
-    var remaining = calcRemainingDays(keyObj);
-    if (remaining <= 0) {
-      saveSession(keyObj, 0);
-      showView(expiredView);
-      return;
-    }
-    saveSession(keyObj, remaining);
-    window.location.href = TARGET_URL;
   }
 
-  function checkExistingSession() {
-    var session = getSession();
-    if (!session) {
+  async function apiCall(body) {
+    var res = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    return await res.json();
+  }
+
+  function saveSession(token) {
+    localStorage.setItem(SESSION_KEY, token);
+  }
+
+  function getSession() {
+    try {
+      return localStorage.getItem(SESSION_KEY) || null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function clearSession() {
+    localStorage.removeItem(SESSION_KEY);
+  }
+
+  async function attemptLogin(inputKey) {
+    var btn = document.querySelector('.btn-primary');
+    setLoading(btn, true);
+    hideError();
+
+    try {
+      var result = await apiCall({ action: 'validate-key', key: inputKey });
+      if (result.valid && result.token) {
+        saveSession(result.token);
+        window.location.href = TARGET_URL;
+      } else {
+        showError();
+      }
+    } catch (e) {
+      showError();
+    } finally {
+      setLoading(btn, false);
+    }
+  }
+
+  async function checkExistingSession() {
+    var token = getSession();
+    if (!token) {
       showView(gateView);
       return;
     }
-    var keyObj = findKey(session.key);
-    if (!keyObj) {
+
+    try {
+      var result = await apiCall({ action: 'verify-token', token: token });
+      if (result.valid) {
+        window.location.href = TARGET_URL;
+      } else {
+        clearSession();
+        if (result.error === 'expired') {
+          showView(expiredView);
+        } else {
+          showView(gateView);
+        }
+      }
+    } catch (e) {
       clearSession();
       showView(gateView);
-      return;
     }
-    var remaining = calcRemainingDays(keyObj);
-    if (remaining <= 0) {
-      showView(expiredView);
-      return;
-    }
-    window.location.href = TARGET_URL;
   }
 
   document.getElementById('gate-form').addEventListener('submit', function (e) {
