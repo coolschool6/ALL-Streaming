@@ -110,7 +110,13 @@ module.exports = async function (req, res) {
     var signature = sign(payload);
     var token = Buffer.from(payload).toString('base64url') + '.' + signature;
 
-    return res.status(200).json({ valid: true, token: token, remaining: remaining });
+    return res.status(200).json({
+      valid: true,
+      token: token,
+      remaining: remaining,
+      activatedAt: activatedAt,
+      expiresAt: expiryDate.toISOString()
+    });
   }
 
   if (body.action === 'verify-token') {

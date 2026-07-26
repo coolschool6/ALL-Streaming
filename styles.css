@@ -125,6 +125,24 @@ body {
   transform: scale(0.98);
 }
 
+.btn-text {
+  display: inline-block;
+  width: 100%;
+  margin-top: 12px;
+  background: transparent;
+  border: 0;
+  color: #9a9a9a;
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.btn-text:hover {
+  color: #fff;
+}
+
 .error-msg {
   display: none;
   background: rgba(229, 9, 20, 0.15);
@@ -138,6 +156,22 @@ body {
 }
 
 .error-msg.visible {
+  display: block;
+}
+
+.status-msg {
+  display: none;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-top: 16px;
+  font-size: 14px;
+  color: #ddd;
+  line-height: 1.5;
+}
+
+.status-msg.visible {
   display: block;
 }
 

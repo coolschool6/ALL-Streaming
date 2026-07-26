@@ -9,6 +9,7 @@
   var expiredView = document.getElementById('expired-view');
   var keyInput = document.getElementById('key-input');
   var errorMsg = document.getElementById('error-msg');
+  var statusMsg = document.getElementById('status-msg');
 
   function showView(view) {
     gateView.classList.remove('active');
@@ -24,6 +25,16 @@
 
   function hideError() {
     errorMsg.classList.remove('visible');
+  }
+
+  function showStatus(text) {
+    statusMsg.textContent = text;
+    statusMsg.classList.add('visible');
+  }
+
+  function hideStatus() {
+    statusMsg.textContent = '';
+    statusMsg.classList.remove('visible');
   }
 
   function setLoading(btn, loading) {
@@ -66,12 +77,13 @@
     var btn = document.querySelector('.btn-primary');
     setLoading(btn, true);
     hideError();
+    hideStatus();
 
     try {
       var result = await apiCall({ action: 'validate-key', key: inputKey });
       if (result.valid && result.token) {
         saveSession(result.token);
-        window.location.href = TARGET_URL;
+        showStatus('Activated on ' + new Date(result.activatedAt).toLocaleString() + '. Days remaining: ' + result.remaining + '.');
       } else {
         showError();
       }
@@ -82,29 +94,16 @@
     }
   }
 
-  async function checkExistingSession() {
+  function checkExistingSession() {
     var token = getSession();
     if (!token) {
       showView(gateView);
+      hideStatus();
       return;
     }
 
-    try {
-      var result = await apiCall({ action: 'verify-token', token: token });
-      if (result.valid) {
-        window.location.href = TARGET_URL;
-      } else {
-        clearSession();
-        if (result.error === 'expired') {
-          showView(expiredView);
-        } else {
-          showView(gateView);
-        }
-      }
-    } catch (e) {
-      clearSession();
-      showView(gateView);
-    }
+    showView(gateView);
+    showStatus('A saved session is on this browser. Enter the same key to review its start date and remaining time, or use a different key to clear it.');
   }
 
   document.getElementById('gate-form').addEventListener('submit', function (e) {
@@ -121,6 +120,16 @@
   document.getElementById('btn-retry').addEventListener('click', function () {
     keyInput.value = '';
     hideError();
+    hideStatus();
+    showView(gateView);
+    keyInput.focus();
+  });
+
+  document.getElementById('btn-clear-session').addEventListener('click', function () {
+    clearSession();
+    keyInput.value = '';
+    hideError();
+    hideStatus();
     showView(gateView);
     keyInput.focus();
   });
