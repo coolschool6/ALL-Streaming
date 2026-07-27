@@ -22,6 +22,9 @@
       </div>
     </div>
     <div class="nav-right">
+      <div id="sub-badge" class="subscription-badge" style="display:none;" title="Subscription Status">
+        ⏳ <span id="sub-days-left">0</span> days left
+      </div>
       <button class="search-toggle" id="search-toggle" aria-label="Search">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
       </button>
@@ -92,7 +95,7 @@
       <h2>🔒 ALLStreaming Access</h2>
       <p>This service costs <strong>100 TTD / month</strong>.</p>
       <p class="paywall-instructions">
-        To get your 30-day key, pay via bank transfer and send proof via WhatsApp.
+        Pay via bank transfer and send your receipt on WhatsApp to receive your 30-day key.
       </p>
       
       <input type="text" id="key-input" placeholder="Enter your 30-day key..." autocomplete="off" />
@@ -109,6 +112,19 @@
   </div>
 
   <style>
+  .subscription-badge {
+    background: rgba(37, 211, 102, 0.15);
+    border: 1px solid #25d366;
+    color: #25d366;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-right: 15px;
+  }
   .paywall-modal {
     position: fixed;
     inset: 0;
