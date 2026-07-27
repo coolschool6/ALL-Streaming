@@ -4,7 +4,8 @@
   var API_KEY = 'cd27a14dfc1752e04b474124a5af6d2b';
   var BASE = 'https://api.themoviedb.org/3';
   var IMG = 'https://image.tmdb.org/t/p/';
-  var VIDCORE = 'https://www.vidcore.org/embed/';
+  // Updated embed provider to bypass connection refusals
+  var EMBED_URL = 'https://vidsrc.cc/v2/embed/';
 
   var content = document.getElementById('content');
   var loading = document.getElementById('loading');
@@ -43,7 +44,7 @@
   var searchTimeout = null;
   var currentMedia = null;
 
-  /* ===== AD BLOCKING ===== */
+  /* ===== AD & POPUP BLOCKING ===== */
   var _origOpen = window.open.bind(window);
   window.open = function () { return null; };
   window.addEventListener('beforeunload', function (e) {
@@ -379,7 +380,7 @@
       setupTVControls(item.id);
     } else {
       tvControls.style.display = 'none';
-      playerIframe.src = VIDCORE + 'movie/' + item.id;
+      playerIframe.src = EMBED_URL + 'movie/' + item.id;
     }
 
     playerModal.classList.add('active');
@@ -455,7 +456,7 @@
   }
 
   function loadTVEpisode(tvId, seasonNum, epNum) {
-    playerIframe.src = VIDCORE + 'tv/' + tvId + '/' + seasonNum + '/' + epNum;
+    playerIframe.src = EMBED_URL + 'tv/' + tvId + '/' + seasonNum + '/' + epNum;
   }
 
   /* ===== SEARCH ===== */
