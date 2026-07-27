@@ -43,6 +43,7 @@
   var searchTimeout = null;
 
   /* ===== AD BLOCKING ===== */
+  var _origOpen = window.open;
   window.open = function () { return null; };
   window.addEventListener('beforeunload', function (e) {
     if (playerModal && playerModal.classList.contains('active')) {
@@ -54,6 +55,16 @@
     var link = e.target.closest('a[target="_blank"]');
     if (link && !link.closest('.player-modal')) {
       e.preventDefault();
+    }
+  }, true);
+  document.addEventListener('mousedown', function (e) {
+    if (e.target.closest('.player-modal') && !e.target.closest('iframe')) {
+      e.stopPropagation();
+    }
+  }, true);
+  window.addEventListener('message', function (e) {
+    if (e.data && (e.data === 'open' || (typeof e.data === 'string' && e.data.indexOf('popup') !== -1))) {
+      e.stopImmediatePropagation();
     }
   }, true);
 
