@@ -29,21 +29,19 @@
     panel.id = 'admin-panel-box';
     panel.style.cssText = 'display:none; position:absolute; bottom:50px; right:0; width:350px; background:#181818; color:#fff; border:1px solid #333; border-radius:8px; padding:20px; box-shadow:0 8px 24px rgba(0,0,0,0.5);';
 
-    panel.innerHTML = `
-      <h3 style="margin-top:0; font-size:18px; border-bottom:1px solid #333; padding-bottom:10px;">Key Management</h3>
-      <div style="margin-bottom:15px;">
-        <label style="font-size:12px; color:#aaa; display:block; margin-bottom:5px;">Key Label / User Name</label>
-        <input type="text" id="admin-key-label" placeholder="e.g., John Doe" style="width:100%; padding:8px; background:#222; border:1px solid #444; color:#fff; border-radius:4px; box-sizing:border-box;">
-      </div>
-      <div style="margin-bottom:15px;">
-        <label style="font-size:12px; color:#aaa; display:block; margin-bottom:5px;">Duration (Days)</label>
-        <input type="number" id="admin-key-days" value="30" style="width:100%; padding:8px; background:#222; border:1px solid #444; color:#fff; border-radius:4px; box-sizing:border-box;">
-      </div>
-      <button id="admin-generate-btn" style="width:100%; background:#28a745; color:#fff; border:none; padding:10px; border-radius:4px; cursor:pointer; font-weight:bold; margin-bottom:15px;">Generate New Key</button>
-      
-      <h4 style="font-size:14px; margin:10px 0 5px 0; border-bottom:1px solid #333; padding-bottom:5px;">Active Keys List</h4>
-      <div id="admin-keys-list" style="max-height:180px; overflow-y:auto; font-size:12px;"></div>
-    `;
+    panel.innerHTML = 
+      '<h3 style="margin-top:0; font-size:18px; border-bottom:1px solid #333; padding-bottom:10px;">Key Management</h3>' +
+      '<div style="margin-bottom:15px;">' +
+        '<label style="font-size:12px; color:#aaa; display:block; margin-bottom:5px;">Key Label / User Name</label>' +
+        '<input type="text" id="admin-key-label" placeholder="e.g., John Doe" style="width:100%; padding:8px; background:#222; border:1px solid #444; color:#fff; border-radius:4px; box-sizing:border-box;">' +
+      '</div>' +
+      '<div style="margin-bottom:15px;">' +
+        '<label style="font-size:12px; color:#aaa; display:block; margin-bottom:5px;">Duration (Days)</label>' +
+        '<input type="number" id="admin-key-days" value="30" style="width:100%; padding:8px; background:#222; border:1px solid #444; color:#fff; border-radius:4px; box-sizing:border-box;">' +
+      '</div>' +
+      '<button id="admin-generate-btn" style="width:100%; background:#28a745; color:#fff; border:none; padding:10px; border-radius:4px; cursor:pointer; font-weight:bold; margin-bottom:15px;">Generate New Key</button>' +
+      '<h4 style="font-size:14px; margin:10px 0 5px 0; border-bottom:1px solid #333; padding-bottom:5px;">Active Keys List</h4>' +
+      '<div id="admin-keys-list" style="max-height:180px; overflow-y:auto; font-size:12px;"></div>';
 
     container.appendChild(toggleBtn);
     container.appendChild(panel);
