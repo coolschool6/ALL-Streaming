@@ -1,6 +1,12 @@
 (function () {
   'use strict';
 
+  // BLOCK ROGUE MOBILE POP-UPS INTERCEPTOR
+  window.open = function (url) {
+    console.warn("Blocked unauthorized popup injection:", url);
+    return null;
+  };
+
   var API_KEY = 'cd27a14dfc1752e04b474124a5af6d2b';
   var BASE = 'https://api.themoviedb.org/3';
   var IMG = 'https://image.tmdb.org/t/p/';
@@ -41,7 +47,7 @@
   var searchToggle = document.getElementById('search-toggle');
   var searchBar = document.getElementById('search-bar');
   var searchInput = document.getElementById('search-input');
-  var searchClose = document.getElementById('search-close') || document.getElementById('searchClose');
+  var searchClose = document.getElementById('search-close');
   var navBtns = document.querySelectorAll('.nav-btn');
 
   var serverSelect = null;
@@ -51,10 +57,6 @@
   var currentFilter = 'all';
   var searchTimeout = null;
   var currentMedia = null;
-
-  window.open = function () {
-    return { focus: function () {}, blur: function () {}, close: function () {} };
-  };
 
   function initServerSelector() {
     if (document.getElementById('server-select')) {
@@ -103,7 +105,6 @@
     return d.innerHTML;
   }
 
-  /* ===== LOCAL STORAGE HISTORY (CONTINUE WATCHING) ===== */
   function saveWatchHistory(item, mediaType) {
     try {
       var history = JSON.parse(localStorage.getItem('dulo_history') || '[]');
@@ -123,7 +124,6 @@
     }
   }
 
-  /* ===== HERO ===== */
   function initHero(items) {
     heroItems = items.slice(0, 8);
     heroIndex = 0;
@@ -192,7 +192,6 @@
     startHeroRotation();
   }
 
-  /* ===== CHANNELS ===== */
   var CHANNELS = [
     { name: 'Netflix', logo: 'logos/netflix.png', provider_id: 8 },
     { name: 'Prime Video', logo: 'logos/primevideo.png', provider_id: 9 },
@@ -311,7 +310,6 @@
     window.scrollTo({ top: 300, behavior: 'smooth' });
   }
 
-  /* ===== ROWS & CARDS ===== */
   function createCategoryRow(title, items, type, useTopStyle) {
     if (!items || items.length === 0) return null;
     var section = document.createElement('div');
@@ -367,14 +365,6 @@
       poster.appendChild(rating);
     }
 
-    var overlay = document.createElement('div');
-    overlay.className = 'card-overlay';
-    var playBtn = document.createElement('div');
-    playBtn.className = 'card-play';
-    playBtn.innerHTML = '<svg viewBox="0 0 24 24"><polygon points="5,3 19,12 5,21"/></svg>';
-    overlay.appendChild(playBtn);
-    poster.appendChild(overlay);
-
     card.appendChild(poster);
 
     var info = document.createElement('div');
@@ -403,11 +393,6 @@
     var card = document.createElement('div');
     card.className = 'top-card';
 
-    var num = document.createElement('div');
-    num.className = 'top-number';
-    num.textContent = rank;
-    card.appendChild(num);
-
     var posterWrap = document.createElement('div');
     posterWrap.className = 'top-card-poster';
     var img = document.createElement('img');
@@ -425,7 +410,6 @@
     return card;
   }
 
-  /* ===== DETAIL MODAL ===== */
   function openDetail(item, mediaType) {
     var bg = item.backdrop_path || item.poster_path;
     detailBackdrop.style.backgroundImage = bg ? 'url(' + imgURL(bg, 'original') + ')' : 'none';
@@ -460,7 +444,6 @@
     document.body.style.overflow = '';
   }
 
-  /* ===== PLAYER ENGINE ===== */
   function buildEmbedURL(server, mediaType, id, season, episode) {
     season = season || 1;
     episode = episode || 1;
@@ -475,13 +458,6 @@
     initServerSelector();
     currentMedia = { item: item, type: mediaType };
     playerTitle.textContent = item.title || item.name || '';
-
-    playerIframe.setAttribute('allow', 'autoplay; encrypted-media; fullscreen; picture-in-picture');
-    playerIframe.setAttribute('allowfullscreen', 'true');
-    playerIframe.style.width = '100%';
-    playerIframe.style.height = '100%';
-    playerIframe.style.border = '0';
-    playerIframe.style.display = 'block';
 
     if (mediaType === 'tv') {
       tvControls.style.display = 'flex';
@@ -566,7 +542,6 @@
       });
   }
 
-  /* ===== SEARCH ===== */
   function toggleSearch() {
     var isActive = searchBar.classList.contains('active');
     if (isActive) {
@@ -654,7 +629,6 @@
     navbar.classList.toggle('scrolled', window.scrollY > 60);
   }
 
-  /* ===== INIT ===== */
   function init() {
     loading.style.display = 'flex';
 
