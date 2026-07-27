@@ -3,7 +3,11 @@ const fs = require('fs');
 const path = require('path');
 
 const keysPath = path.join(__dirname, '..', 'keys.json');
+const statePath = path.join(__dirname, '..', 'key-state.json');
 const SECRET = process.env.SESSION_SECRET || 'allstreaming-default-secret-change-me';
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN || '';
+const REPO_OWNER = process.env.REPO_OWNER || 'coolschool6';
+const REPO_NAME = process.env.REPO_NAME || 'ALLStreaming';
 
 function sign(payload) {
   return crypto.createHmac('sha256', SECRET).update(payload).digest('hex');
@@ -16,6 +20,30 @@ function loadKeys() {
   } catch (e) {
     return [];
   }
+}
+
+function loadState() {
+  try { return JSON.parse(fs.readFileSync(statePath, 'utf8')); } catch (e) { return {}; }
+}
+
+function saveState(state) {
+  try { fs.writeFileSync(statePath, JSON.stringify(state, null, 2) + '\n', 'utf8'); } catch (e) {}
+}
+
+async function persistState(state) {
+  saveState(state);
+  if (!GITHUB_TOKEN) return;
+  try {
+    var url = 'https://api.github.com/repos/' + REPO_OWNER + '/' + REPO_NAME + '/contents/key-state.json';
+    var existing = await fetch(url, { headers: { 'Authorization': 'Bearer ' + GITHUB_TOKEN, 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'ALLStreaming' } });
+    var sha = null;
+    if (existing.ok) { var d = await existing.json(); sha = d.sha; }
+    var res = await fetch(url, {
+      method: 'PUT',
+      headers: { 'Authorization': 'Bearer ' + GITHUB_TOKEN, 'Accept': 'application/vnd.github.v3+json', 'Content-Type': 'application/json', 'User-Agent': 'ALLStreaming' },
+      body: JSON.stringify({ message: 'Update key activation state', content: Buffer.from(JSON.stringify(state, null, 2) + '\n').toString('base64'), sha: sha, branch: 'main' })
+    });
+  } catch (e) {}
 }
 
 function findKey(inputKey) {
@@ -60,7 +88,17 @@ module.exports = async function (req, res) {
       return res.status(500).json({ valid: false, error: 'Invalid key configuration' });
     }
 
-    var activatedAt = new Date().toISOString();
+    var state = loadState();
+    var keyState = state[keyObj.key];
+    var activatedAt;
+    if (keyState && keyState.activatedAt) {
+      activatedAt = keyState.activatedAt;
+    } else {
+      activatedAt = new Date().toISOString();
+      state[keyObj.key] = { activatedAt: activatedAt };
+      persistState(state);
+    }
+
     var expiryMs = new Date(activatedAt).getTime() + validDays * 86400000;
     var remaining = calcRemaining(activatedAt, validDays);
     if (remaining <= 0) return res.status(401).json({ valid: false, error: 'expired' });

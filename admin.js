@@ -66,33 +66,26 @@
     return data;
   }
 
-  var currentKeys = [];
+  function escHtml(s) {
+    var d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
 
-  function getKeyStatus(keyObj) {
-    if (keyObj.disabled) return 'disabled';
-    var token = keyObj._token;
-    if (!token) return 'unused';
-    try {
-      var parts = token.split('.');
-      if (parts.length !== 2) return 'unknown';
-      var payloadStr = atob(parts[0].replace(/-/g, '+').replace(/_/g, '/'));
-      var data = JSON.parse(payloadStr);
-      if (data.e < Date.now()) return 'expired';
-      var days = Math.ceil((data.e - Date.now()) / 86400000);
-      return 'active (' + days + 'd left)';
-    } catch (e) {
-      return 'unknown';
-    }
+  function escAttr(s) {
+    return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
   function renderKeys(keys) {
-    currentKeys = keys;
     keysLoading.style.display = 'none';
 
     if (!keys || keys.length === 0) {
       keysTableWrap.style.display = 'none';
       keysEmpty.style.display = 'block';
-      updateStats(keys || []);
+      document.getElementById('stat-total').textContent = '0';
+      document.getElementById('stat-active').textContent = '0';
+      document.getElementById('stat-expired').textContent = '0';
+      document.getElementById('stat-disabled').textContent = '0';
       return;
     }
 
@@ -101,26 +94,46 @@
     keysTbody.innerHTML = '';
 
     var total = keys.length;
-    var active = 0;
-    var expired = 0;
-    var disabled = 0;
+    var activeCount = 0;
+    var expiredCount = 0;
+    var disabledCount = 0;
 
     keys.forEach(function (k) {
       var tr = document.createElement('tr');
       if (k.disabled) tr.className = 'row-disabled';
 
-      var status = getKeyStatus(k);
-      var statusClass = 'status-unused';
-      if (k.disabled) { statusClass = 'status-disabled'; disabled++; }
-      else if (status.indexOf('active') === 0) { statusClass = 'status-active'; active++; }
-      else if (status === 'expired') { statusClass = 'status-expired'; expired++; }
-      else if (status === 'unused') { statusClass = 'status-unused'; }
+      var statusText, statusClass;
+      if (k.disabled) {
+        statusText = 'Disabled';
+        statusClass = 'status-disabled';
+        disabledCount++;
+      } else if (k.activatedAt) {
+        var remaining = Math.ceil((k.expiresAt - Date.now()) / 86400000);
+        if (remaining <= 0) {
+          statusText = 'Expired';
+          statusClass = 'status-expired';
+          expiredCount++;
+        } else {
+          statusText = 'Active (' + remaining + 'd left)';
+          statusClass = 'status-active';
+          activeCount++;
+        }
+      } else {
+        statusText = 'Available';
+        statusClass = 'status-unused';
+      }
+
+      var note = k.userNote || '-';
+      var activatedStr = k.activatedAt ? new Date(k.activatedAt).toLocaleDateString() : '-';
+      var expiresStr = k.expiresAt ? new Date(k.expiresAt).toLocaleDateString() : '-';
 
       tr.innerHTML =
         '<td class="key-name">' + escHtml(k.key) + '</td>' +
-        '<td>' + k.validDays + '</td>' +
-        '<td class="key-note">' + escHtml(k.userNote || '-') + '</td>' +
-        '<td><span class="badge ' + statusClass + '">' + escHtml(status) + '</span></td>' +
+        '<td>' + k.validDays + 'd</td>' +
+        '<td class="key-note">' + escHtml(note) + '</td>' +
+        '<td>' + activatedStr + '</td>' +
+        '<td>' + expiresStr + '</td>' +
+        '<td><span class="badge ' + statusClass + '">' + statusText + '</span></td>' +
         '<td class="actions">' +
           (k.disabled
             ? '<button class="btn-sm btn-enable" data-key="' + escAttr(k.key) + '">Enable</button>'
@@ -132,40 +145,15 @@
       keysTbody.appendChild(tr);
     });
 
-    updateStats(keys);
-  }
-
-  function updateStats(keys) {
-    var total = keys.length;
-    var active = 0;
-    var expired = 0;
-    var disabled = 0;
-
-    keys.forEach(function (k) {
-      if (k.disabled) { disabled++; return; }
-      var s = getKeyStatus(k);
-      if (s.indexOf('active') === 0) active++;
-      else if (s === 'expired') expired++;
-    });
-
     document.getElementById('stat-total').textContent = total;
-    document.getElementById('stat-active').textContent = active;
-    document.getElementById('stat-expired').textContent = expired;
-    document.getElementById('stat-disabled').textContent = disabled;
-  }
-
-  function escHtml(s) {
-    var d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
-  }
-
-  function escAttr(s) {
-    return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    document.getElementById('stat-active').textContent = activeCount;
+    document.getElementById('stat-expired').textContent = expiredCount;
+    document.getElementById('stat-disabled').textContent = disabledCount;
   }
 
   async function loadKeys() {
     keysLoading.style.display = 'block';
+    keysLoading.textContent = 'Loading keys...';
     keysTableWrap.style.display = 'none';
     keysEmpty.style.display = 'none';
     try {
@@ -211,11 +199,11 @@
 
     try {
       await apiCall({ action: 'admin-add', key: name, validDays: days, userNote: note });
-      showStatus(msg, 'Key "' + name + '" added. Deploying...');
+      showStatus(msg, 'Key "' + name + '" added.');
       document.getElementById('new-key-name').value = '';
       document.getElementById('new-key-days').value = '';
       document.getElementById('new-key-note').value = '';
-      setTimeout(loadKeys, 3000);
+      setTimeout(loadKeys, 1500);
     } catch (e) {
       showError(loginError, 'Failed: ' + e.message);
     }
@@ -237,10 +225,42 @@
 
     try {
       await apiCall({ action: 'admin-extend', key: name, addDays: days });
-      showStatus(msg, 'Extended "' + name + '" by ' + days + ' days. Deploying...');
+      showStatus(msg, 'Extended "' + name + '" by ' + days + ' days.');
       document.getElementById('extend-key-name').value = '';
       document.getElementById('extend-key-days').value = '';
-      setTimeout(loadKeys, 3000);
+      setTimeout(loadKeys, 1500);
+    } catch (e) {
+      showError(loginError, 'Failed: ' + e.message);
+    }
+  });
+
+  document.getElementById('check-key-form').addEventListener('submit', async function (e) {
+    e.preventDefault();
+    var msg = document.getElementById('check-key-msg');
+    hideStatus(msg);
+    hideError(loginError);
+
+    var name = document.getElementById('check-key-name').value.trim();
+    if (!name) {
+      showError(loginError, 'Enter a key name to check.');
+      return;
+    }
+
+    try {
+      var result = await apiCall({ action: 'admin-check-key', key: name });
+      if (result.valid) {
+        var actDate = result.activatedAt ? new Date(result.activatedAt).toLocaleString() : 'Not yet';
+        var expDate = result.expiresAt ? new Date(result.expiresAt).toLocaleString() : '-';
+        showStatus(msg,
+          'Key: ' + name + ' — VALID\n' +
+          'Activated: ' + actDate + '\n' +
+          'Expires: ' + expDate + '\n' +
+          'Days remaining: ' + result.remaining
+        );
+      } else {
+        showStatus(msg, 'Key: ' + name + ' — ' + (result.error || 'INVALID'));
+      }
+      document.getElementById('check-key-name').value = '';
     } catch (e) {
       showError(loginError, 'Failed: ' + e.message);
     }
@@ -262,7 +282,7 @@
 
     try {
       await apiCall({ action: 'admin-' + action, key: keyName });
-      setTimeout(loadKeys, 2000);
+      setTimeout(loadKeys, 1000);
     } catch (e) {
       alert('Failed: ' + e.message);
       btn.disabled = false;

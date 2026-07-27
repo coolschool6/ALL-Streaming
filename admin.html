@@ -94,6 +94,8 @@
                 <th>Key</th>
                 <th>Days</th>
                 <th>Note</th>
+                <th>Activated</th>
+                <th>Expires</th>
                 <th>Status</th>
                 <th>Actions</th>
               </tr>
@@ -102,6 +104,22 @@
           </table>
         </div>
         <div id="keys-empty" class="empty-msg" style="display:none;">No keys found.</div>
+      </div>
+
+      <div class="admin-section">
+        <div class="section-header">
+          <h2>Check Key Status</h2>
+        </div>
+        <form id="check-key-form" class="add-key-form">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="check-key-name">Key Name</label>
+              <input type="text" id="check-key-name" placeholder="e.g. ISRAEL" required>
+            </div>
+            <button type="submit" class="btn-primary btn-add">Check</button>
+          </div>
+        </form>
+        <div id="check-key-msg" class="status-msg"></div>
       </div>
 
       <div class="admin-section">

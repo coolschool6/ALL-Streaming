@@ -77,6 +77,14 @@ async function persistKeys(keys) {
   }
 }
 
+function findKey(keys, name) {
+  var normalised = name.trim().toUpperCase();
+  for (var i = 0; i < keys.length; i++) {
+    if (keys[i].key.toUpperCase() === normalised) return keys[i];
+  }
+  return null;
+}
+
 function createAdminToken() {
   var payload = JSON.stringify({ admin: true, iat: Date.now() });
   var signature = sign(payload);
@@ -95,6 +103,15 @@ function verifyAdminToken(token) {
   } catch (e) {
     return false;
   }
+}
+
+function calcRemaining(activatedAt, validDays) {
+  var expiry = new Date(activatedAt);
+  expiry.setDate(expiry.getDate() + validDays);
+  var today = new Date();
+  today.setHours(0, 0, 0, 0);
+  expiry.setHours(0, 0, 0, 0);
+  return Math.ceil((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 }
 
 module.exports = async function (req, res) {
@@ -127,14 +144,68 @@ module.exports = async function (req, res) {
 
   if (body.action === 'admin-list') {
     var keys = loadKeys();
+    var statePath = path.join(__dirname, '..', 'key-state.json');
+    var state = {};
+    try { state = JSON.parse(fs.readFileSync(statePath, 'utf8')); } catch (e) {}
+
     var enriched = keys.map(function (k) {
       var result = { key: k.key, validDays: k.validDays, userNote: k.userNote || '', disabled: !!k.disabled };
-      if (!k.disabled && k._token) {
-        result._token = k._token;
+      var s = state[k.key];
+      if (s && s.activatedAt) {
+        result.activatedAt = s.activatedAt;
+        var expiryMs = new Date(s.activatedAt).getTime() + Number(k.validDays) * 86400000;
+        result.expiresAt = expiryMs;
+        result.remaining = Math.ceil((expiryMs - Date.now()) / 86400000);
       }
       return result;
     });
     return res.status(200).json({ keys: enriched });
+  }
+
+  if (body.action === 'admin-check-key') {
+    var inputKey = typeof body.key === 'string' ? body.key.trim() : '';
+    if (!inputKey) return res.status(400).json({ error: 'Key name required' });
+
+    var keys = loadKeys();
+    var keyObj = findKey(keys, inputKey);
+    if (!keyObj) return res.status(200).json({ valid: false, error: 'Key not found in keys.json' });
+    if (keyObj.disabled) return res.status(200).json({ valid: false, error: 'Key is disabled' });
+
+    var validDays = Number(keyObj.validDays);
+    if (!Number.isFinite(validDays) || validDays <= 0) {
+      return res.status(200).json({ valid: false, error: 'Invalid key configuration' });
+    }
+
+    var statePath = path.join(__dirname, '..', 'key-state.json');
+    var state = {};
+    try { state = JSON.parse(fs.readFileSync(statePath, 'utf8')); } catch (e) {}
+
+    var keyState = state[keyObj.key];
+    if (keyState && keyState.activatedAt) {
+      var remaining = calcRemaining(keyState.activatedAt, validDays);
+      var expiryMs = new Date(keyState.activatedAt).getTime() + validDays * 86400000;
+      if (remaining <= 0) {
+        return res.status(200).json({ valid: false, error: 'expired', activatedAt: keyState.activatedAt, expiresAt: expiryMs });
+      }
+      return res.status(200).json({
+        valid: true,
+        activatedAt: keyState.activatedAt,
+        expiresAt: expiryMs,
+        remaining: remaining,
+        validDays: validDays
+      });
+    }
+
+    var now = new Date().toISOString();
+    var expiryMs = new Date(now).getTime() + validDays * 86400000;
+    return res.status(200).json({
+      valid: true,
+      activatedAt: null,
+      expiresAt: expiryMs,
+      remaining: validDays,
+      validDays: validDays,
+      note: 'Not yet activated by any user'
+    });
   }
 
   if (body.action === 'admin-add') {
@@ -146,10 +217,8 @@ module.exports = async function (req, res) {
     if (!Number.isFinite(newDays) || newDays <= 0) return res.status(400).json({ error: 'Valid days required' });
 
     var addKeys = loadKeys();
-    for (var i = 0; i < addKeys.length; i++) {
-      if (addKeys[i].key.toUpperCase() === newKey.toUpperCase()) {
-        return res.status(409).json({ error: 'Key already exists' });
-      }
+    if (findKey(addKeys, newKey)) {
+      return res.status(409).json({ error: 'Key already exists' });
     }
 
     addKeys.push({ key: newKey, validDays: newDays, userNote: newNote });
@@ -162,16 +231,10 @@ module.exports = async function (req, res) {
     if (!disableKey) return res.status(400).json({ error: 'Key name required' });
 
     var disableKeys = loadKeys();
-    var found = false;
-    for (var i = 0; i < disableKeys.length; i++) {
-      if (disableKeys[i].key.toUpperCase() === disableKey.toUpperCase()) {
-        disableKeys[i].disabled = true;
-        found = true;
-        break;
-      }
-    }
-    if (!found) return res.status(404).json({ error: 'Key not found' });
+    var keyToDisable = findKey(disableKeys, disableKey);
+    if (!keyToDisable) return res.status(404).json({ error: 'Key not found' });
 
+    keyToDisable.disabled = true;
     await persistKeys(disableKeys);
     return res.status(200).json({ success: true });
   }
@@ -181,16 +244,10 @@ module.exports = async function (req, res) {
     if (!enableKey) return res.status(400).json({ error: 'Key name required' });
 
     var enableKeys = loadKeys();
-    var found = false;
-    for (var i = 0; i < enableKeys.length; i++) {
-      if (enableKeys[i].key.toUpperCase() === enableKey.toUpperCase()) {
-        delete enableKeys[i].disabled;
-        found = true;
-        break;
-      }
-    }
-    if (!found) return res.status(404).json({ error: 'Key not found' });
+    var keyToEnable = findKey(enableKeys, enableKey);
+    if (!keyToEnable) return res.status(404).json({ error: 'Key not found' });
 
+    delete keyToEnable.disabled;
     await persistKeys(enableKeys);
     return res.status(200).json({ success: true });
   }
@@ -200,10 +257,11 @@ module.exports = async function (req, res) {
     if (!deleteKey) return res.status(400).json({ error: 'Key name required' });
 
     var deleteKeys = loadKeys();
+    var normalisedDelete = deleteKey.toUpperCase();
     var found = false;
     var newKeysList = [];
     for (var i = 0; i < deleteKeys.length; i++) {
-      if (deleteKeys[i].key.toUpperCase() === deleteKey.toUpperCase()) {
+      if (deleteKeys[i].key.toUpperCase() === normalisedDelete) {
         found = true;
       } else {
         newKeysList.push(deleteKeys[i]);
@@ -222,18 +280,12 @@ module.exports = async function (req, res) {
     if (!Number.isFinite(addDays) || addDays <= 0) return res.status(400).json({ error: 'Days to add required' });
 
     var extendKeys = loadKeys();
-    var found = false;
-    for (var i = 0; i < extendKeys.length; i++) {
-      if (extendKeys[i].key.toUpperCase() === extendKey.toUpperCase()) {
-        extendKeys[i].validDays = Number(extendKeys[i].validDays) + addDays;
-        found = true;
-        break;
-      }
-    }
-    if (!found) return res.status(404).json({ error: 'Key not found' });
+    var keyToExtend = findKey(extendKeys, extendKey);
+    if (!keyToExtend) return res.status(404).json({ error: 'Key not found' });
 
+    keyToExtend.validDays = Number(keyToExtend.validDays) + addDays;
     await persistKeys(extendKeys);
-    return res.status(200).json({ success: true, newDays: extendKeys[i].validDays });
+    return res.status(200).json({ success: true, newDays: keyToExtend.validDays });
   }
 
   return res.status(400).json({ error: 'Unknown action' });
