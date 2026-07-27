@@ -175,6 +175,25 @@ body {
   display: block;
 }
 
+.countdown-timer {
+  display: none;
+  background: rgba(229, 9, 20, 0.1);
+  border: 1px solid rgba(229, 9, 20, 0.3);
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-top: 16px;
+  font-size: 22px;
+  font-weight: 600;
+  color: #e50914;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 1px;
+}
+
+.countdown-timer.visible {
+  display: block;
+}
+
 #expired-view {
   align-items: center;
   justify-content: center;

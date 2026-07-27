@@ -3,62 +3,34 @@ const fs = require('fs');
 const path = require('path');
 
 const keysPath = path.join(__dirname, '..', 'keys.json');
-const statePath = path.join(__dirname, '..', 'key-state.json');
-
 const SECRET = process.env.SESSION_SECRET || 'allstreaming-default-secret-change-me';
 
 function sign(payload) {
   return crypto.createHmac('sha256', SECRET).update(payload).digest('hex');
 }
 
-function readJsonFile(filePath, fallback) {
-  try {
-    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
-  } catch (e) {
-    return fallback;
-  }
-}
-
-function writeJsonFile(filePath, value) {
-  fs.writeFileSync(filePath, JSON.stringify(value, null, 2) + '\n', 'utf8');
-}
-
 function loadKeys() {
-  var keys = readJsonFile(keysPath, []);
-  return Array.isArray(keys) ? keys : [];
-}
-
-function loadState() {
-  var state = readJsonFile(statePath, {});
-  return state && typeof state === 'object' && !Array.isArray(state) ? state : {};
-}
-
-function saveState(state) {
-  writeJsonFile(statePath, state);
-}
-
-function getActivationDate(keyObj, state) {
-  var stored = state[keyObj.key];
-  if (stored && stored.activatedAt) {
-    return stored.activatedAt;
+  try {
+    var keys = JSON.parse(fs.readFileSync(keysPath, 'utf8'));
+    return Array.isArray(keys) ? keys : [];
+  } catch (e) {
+    return [];
   }
-  if (keyObj.activatedAt) {
-    return keyObj.activatedAt;
+}
+
+function findKey(inputKey) {
+  var keys = loadKeys();
+  var normalised = inputKey.trim().toUpperCase();
+  for (var i = 0; i < keys.length; i++) {
+    if (keys[i].key.toUpperCase() === normalised) {
+      return keys[i];
+    }
   }
   return null;
 }
 
-function setActivationDate(state, keyObj, activatedAt) {
-  state[keyObj.key] = {
-    activatedAt: activatedAt,
-    validDays: keyObj.validDays
-  };
-  saveState(state);
-}
-
 function calcRemaining(activatedAt, validDays) {
-  var created = new Date(activatedAt);
-  var expiry = new Date(created);
+  var expiry = new Date(activatedAt);
   expiry.setDate(expiry.getDate() + validDays);
   var today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -79,15 +51,8 @@ module.exports = async function (req, res) {
 
   if (body.action === 'validate-key') {
     var inputKey = typeof body.key === 'string' ? body.key : '';
-    var keys = loadKeys();
-    var state = loadState();
-    var keyObj = null;
-    for (var i = 0; i < keys.length; i++) {
-      if (keys[i].key === inputKey) {
-        keyObj = keys[i];
-        break;
-      }
-    }
+    var keyObj = findKey(inputKey);
+
     if (!keyObj) return res.status(401).json({ valid: false, error: 'Invalid key' });
 
     var validDays = Number(keyObj.validDays);
@@ -95,18 +60,12 @@ module.exports = async function (req, res) {
       return res.status(500).json({ valid: false, error: 'Invalid key configuration' });
     }
 
-    var activatedAt = getActivationDate(keyObj, state);
-    if (!activatedAt) {
-      activatedAt = new Date().toISOString();
-      setActivationDate(state, keyObj, activatedAt);
-    }
-
+    var activatedAt = new Date().toISOString();
+    var expiryMs = new Date(activatedAt).getTime() + validDays * 86400000;
     var remaining = calcRemaining(activatedAt, validDays);
     if (remaining <= 0) return res.status(401).json({ valid: false, error: 'expired' });
 
-    var expiryDate = new Date(activatedAt);
-    expiryDate.setDate(expiryDate.getDate() + validDays);
-    var payload = JSON.stringify({ k: keyObj.key, a: activatedAt, d: validDays, e: expiryDate.getTime() });
+    var payload = JSON.stringify({ k: keyObj.key, a: activatedAt, d: validDays, e: expiryMs });
     var signature = sign(payload);
     var token = Buffer.from(payload).toString('base64url') + '.' + signature;
 
@@ -115,7 +74,7 @@ module.exports = async function (req, res) {
       token: token,
       remaining: remaining,
       activatedAt: activatedAt,
-      expiresAt: expiryDate.toISOString()
+      expiresAt: new Date(expiryMs).toISOString()
     });
   }
 
