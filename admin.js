@@ -160,7 +160,13 @@
       var result = await apiCall({ action: 'admin-list' });
       renderKeys(result.keys || []);
     } catch (e) {
-      keysLoading.textContent = 'Failed to load keys: ' + e.message;
+      try {
+        var res = await fetch('keys.json', { cache: 'no-store' });
+        var keys = await res.json();
+        renderKeys(Array.isArray(keys) ? keys : []);
+      } catch (e2) {
+        keysLoading.textContent = 'Failed to load keys: ' + e.message;
+      }
     }
   }
 
