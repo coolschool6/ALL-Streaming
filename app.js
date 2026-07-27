@@ -2,6 +2,7 @@
   'use strict';
 
   var SESSION_KEY = 'ak_session';
+  var LOCAL_STATE_KEY = 'ak_local_activation_state';
   var TARGET_URL = 'https://dulo.tv/';
   var API_URL = '/api/validate';
 
@@ -81,6 +82,75 @@
     localStorage.removeItem(SESSION_KEY);
   }
 
+  function getLocalState() {
+    try {
+      return JSON.parse(localStorage.getItem(LOCAL_STATE_KEY) || '{}');
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function saveLocalState(state) {
+    localStorage.setItem(LOCAL_STATE_KEY, JSON.stringify(state));
+  }
+
+  async function loadKeys() {
+    var res = await fetch('keys.json', { cache: 'no-store' });
+    return await res.json();
+  }
+
+  function calcRemaining(activatedAt, validDays) {
+    var start = new Date(activatedAt);
+    var expiry = new Date(start);
+    expiry.setDate(expiry.getDate() + Number(validDays));
+    var today = new Date();
+    today.setHours(0, 0, 0, 0);
+    expiry.setHours(0, 0, 0, 0);
+    return Math.ceil((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  }
+
+  async function validateLocally(inputKey) {
+    var keys = await loadKeys();
+    var keyObj = null;
+
+    for (var i = 0; i < keys.length; i++) {
+      if (keys[i].key === inputKey) {
+        keyObj = keys[i];
+        break;
+      }
+    }
+
+    if (!keyObj) {
+      return { valid: false, error: 'Invalid key' };
+    }
+
+    var validDays = Number(keyObj.validDays);
+    if (!Number.isFinite(validDays) || validDays <= 0) {
+      return { valid: false, error: 'Invalid key configuration' };
+    }
+
+    var state = getLocalState();
+    var activatedAt = state[keyObj.key] && state[keyObj.key].activatedAt;
+    if (!activatedAt) {
+      activatedAt = new Date().toISOString();
+      state[keyObj.key] = { activatedAt: activatedAt, validDays: validDays };
+      saveLocalState(state);
+    }
+
+    var remaining = calcRemaining(activatedAt, validDays);
+    if (remaining <= 0) {
+      return { valid: false, error: 'expired' };
+    }
+
+    return {
+      valid: true,
+      token: 'local:' + btoa(JSON.stringify({ k: keyObj.key, a: activatedAt, d: validDays })),
+      remaining: remaining,
+      activatedAt: activatedAt,
+      expiresAt: new Date(new Date(activatedAt).getTime() + validDays * 24 * 60 * 60 * 1000).toISOString()
+    };
+  }
+
   async function attemptLogin(inputKey) {
     var btn = document.querySelector('.btn-primary');
     setLoading(btn, true);
@@ -88,7 +158,12 @@
     hideStatus();
 
     try {
-      var result = await apiCall({ action: 'validate-key', key: inputKey });
+      var result;
+      try {
+        result = await apiCall({ action: 'validate-key', key: inputKey });
+      } catch (apiError) {
+        result = await validateLocally(inputKey);
+      }
       if (result.valid && result.token) {
         saveSession(result.token);
         showStatus('Activated on ' + new Date(result.activatedAt).toLocaleString() + '. Days remaining: ' + result.remaining + '.');
@@ -104,7 +179,7 @@
         }
       }
     } catch (e) {
-      showErrorMessage('The validation service is not reachable. Make sure the app is running with the /api/validate endpoint.');
+      showErrorMessage('Validation failed. Check the key exactly or make sure keys.json is reachable.');
     } finally {
       setLoading(btn, false);
     }
