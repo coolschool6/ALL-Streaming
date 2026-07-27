@@ -6,7 +6,7 @@
   var BASE = 'https://api.themoviedb.org/3';
   var IMG = 'https://image.tmdb.org/t/p/';
 
-  // Re-ordered server list with 2Embed set as Default (#1)
+  // Server list with 2Embed as Default (#1)
   var SERVERS = [
     {
       name: 'Server 1 (2Embed - Default)',
@@ -83,7 +83,6 @@
   var currentFilter = 'all';
   var searchTimeout = null;
   var currentMedia = null;
-  var fallbackTimer = null;
 
   /* ===== LIGHTWEIGHT POP-UP SUPPRESSION ===== */
   window.open = function () {
@@ -117,8 +116,7 @@
     }
 
     serverSelect.addEventListener('change', function () {
-      clearTimeout(fallbackTimer);
-      updatePlayerSourceManually();
+      loadServer(parseInt(this.value, 10) || 0);
     });
   }
 
@@ -471,48 +469,29 @@
       setupTVControls(item.id);
     } else {
       tvControls.style.display = 'none';
-      loadServerWithFallback(0);
+      loadServer(0); // Default to Server 1 (2Embed)
     }
 
     playerModal.classList.add('active');
     document.body.style.overflow = 'hidden';
   }
 
-  /* 5-SECOND AUTO FALLBACK SERVER LOADER */
-  function loadServerWithFallback(serverIndex) {
-    clearTimeout(fallbackTimer);
+  /* MANUAL SERVER LOADER (NO AUTOMATIC SWITCHING) */
+  function loadServer(serverIndex) {
     if (!currentMedia) return;
-
-    if (serverIndex >= SERVERS.length) {
-      serverIndex = 0; // Cycle back to 2Embed if all fail
-    }
 
     var item = currentMedia.item;
     var type = currentMedia.type;
     var sNum = seasonSelect.value || 1;
     var eNum = episodeSelect.value || 1;
 
-    var server = SERVERS[serverIndex];
+    var server = SERVERS[serverIndex] || SERVERS[0];
     if (serverSelect) serverSelect.value = serverIndex.toString();
 
     playerIframe.src = buildEmbedURL(server, type, item.id, sNum, eNum);
-
-    // Set 5-second automatic fallback timer to try the next server if unreadable/blocked
-    fallbackTimer = setTimeout(function () {
-      var nextIdx = (serverIndex + 1) % SERVERS.length;
-      loadServerWithFallback(nextIdx);
-    }, 5000);
-  }
-
-  function updatePlayerSourceManually() {
-    clearTimeout(fallbackTimer);
-    if (!currentMedia) return;
-    var idx = parseInt(serverSelect ? serverSelect.value : '0', 10) || 0;
-    loadServerWithFallback(idx);
   }
 
   function closePlayer() {
-    clearTimeout(fallbackTimer);
     playerIframe.src = 'about:blank';
     playerModal.classList.remove('active');
     document.body.style.overflow = '';
@@ -560,7 +539,7 @@
 
         if (!episodes.length) {
           episodeSelect.innerHTML = '<option value="1">Episode 1</option>';
-          loadServerWithFallback(0);
+          loadServer(0);
           return;
         }
 
@@ -572,11 +551,11 @@
         });
 
         episodeSelect.value = 1;
-        loadServerWithFallback(0);
+        loadServer(0);
       })
       .catch(function () {
         episodeSelect.innerHTML = '<option value="1">Episode 1</option>';
-        loadServerWithFallback(0);
+        loadServer(0);
       });
   }
 
@@ -741,7 +720,8 @@
 
     episodeSelect.addEventListener('change', function () {
       if (currentMedia && currentMedia.type === 'tv') {
-        loadServerWithFallback(0);
+        var currentServer = serverSelect ? parseInt(serverSelect.value, 10) : 0;
+        loadServer(currentServer);
       }
     });
 
