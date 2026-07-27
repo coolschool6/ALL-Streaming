@@ -265,6 +265,29 @@ body {
   color: #fff;
 }
 
+.btn-whatsapp {
+  display: block;
+  width: 100%;
+  padding: 14px;
+  background: #25d366;
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  font-family: 'Inter', sans-serif;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+  text-decoration: none;
+  margin-bottom: 12px;
+  transition: background 0.2s, transform 0.1s;
+}
+
+.btn-whatsapp:hover {
+  background: #1da851;
+  transform: scale(0.98);
+}
+
 #admin-password {
   text-transform: none;
   letter-spacing: normal;
