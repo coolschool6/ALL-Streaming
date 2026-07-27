@@ -1,11 +1,17 @@
 (function () {
   'use strict';
 
+  /* ===== CONFIGURATION ===== */
   var API_KEY = 'cd27a14dfc1752e04b474124a5af6d2b';
   var BASE = 'https://api.themoviedb.org/3';
   var IMG = 'https://image.tmdb.org/t/p/';
 
-  // Active multi-server provider list with flexible URL formatting rules
+  // POP-UP CONTROL:
+  // Set to `true` to block 99% of pop-ups/redirects.
+  // Set to `false` if an embed server gives a black screen due to anti-adblock detection.
+  var BLOCK_POPUPS_STRICT = true;
+
+  // Active multi-server provider list
   var SERVERS = [
     {
       name: 'Server 1 (AutoEmbed)',
@@ -83,7 +89,7 @@
   var searchTimeout = null;
   var currentMedia = null;
 
-  /* ===== SAFE POPUP SUPPRESSION ===== */
+  /* ===== POPUP SUPPRESSION HANDLER ===== */
   window.open = function () {
     return {
       focus: function () {},
@@ -115,7 +121,7 @@
     }
 
     serverSelect.addEventListener('change', function () {
-      updatePlayerSource();
+      updatePlayerSourceManually();
     });
   }
 
@@ -453,7 +459,13 @@
     currentMedia = { item: item, type: mediaType };
     playerTitle.textContent = item.title || item.name || '';
 
-    // Force iframe attributes for cross-origin playback compatibility
+    // Apply strict sandboxing to block iframe pop-ups if enabled
+    if (BLOCK_POPUPS_STRICT) {
+      playerIframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-presentation');
+    } else {
+      playerIframe.removeAttribute('sandbox');
+    }
+
     playerIframe.setAttribute('allow', 'autoplay; encrypted-media; fullscreen; picture-in-picture');
     playerIframe.setAttribute('allowfullscreen', 'true');
     playerIframe.setAttribute('referrerpolicy', 'origin');
@@ -468,14 +480,52 @@
       setupTVControls(item.id);
     } else {
       tvControls.style.display = 'none';
-      updatePlayerSource();
+      autoSelectWorkingServer();
     }
 
     playerModal.classList.add('active');
     document.body.style.overflow = 'hidden';
   }
 
-  function updatePlayerSource() {
+  /* AUTO SERVER SELECTION ENGINE */
+  function autoSelectWorkingServer() {
+    if (!currentMedia) return;
+    var item = currentMedia.item;
+    var type = currentMedia.type;
+    var sNum = seasonSelect.value || 1;
+    var eNum = episodeSelect.value || 1;
+
+    function testNextServer(index) {
+      if (index >= SERVERS.length) {
+        // Fallback to Server 1 if all tests fail
+        serverSelect.value = '0';
+        playerIframe.src = buildEmbedURL(SERVERS[0], type, item.id, sNum, eNum);
+        return;
+      }
+
+      var server = SERVERS[index];
+      var targetURL = buildEmbedURL(server, type, item.id, sNum, eNum);
+
+      // Fast background ping test to check domain reachability/DNS
+      var controller = new AbortController();
+      var timeoutId = setTimeout(function () { controller.abort(); }, 2000);
+
+      fetch(targetURL, { mode: 'no-cors', signal: controller.signal })
+        .then(function () {
+          clearTimeout(timeoutId);
+          serverSelect.value = index.toString();
+          playerIframe.src = targetURL;
+        })
+        .catch(function () {
+          clearTimeout(timeoutId);
+          testNextServer(index + 1);
+        });
+    }
+
+    testNextServer(0);
+  }
+
+  function updatePlayerSourceManually() {
     if (!currentMedia) return;
     var idx = parseInt(serverSelect ? serverSelect.value : '0', 10) || 0;
     var server = SERVERS[idx] || SERVERS[0];
@@ -536,7 +586,7 @@
 
         if (!episodes.length) {
           episodeSelect.innerHTML = '<option value="1">Episode 1</option>';
-          updatePlayerSource();
+          autoSelectWorkingServer();
           return;
         }
 
@@ -548,11 +598,11 @@
         });
 
         episodeSelect.value = 1;
-        updatePlayerSource();
+        autoSelectWorkingServer();
       })
       .catch(function () {
         episodeSelect.innerHTML = '<option value="1">Episode 1</option>';
-        updatePlayerSource();
+        autoSelectWorkingServer();
       });
   }
 
@@ -717,7 +767,7 @@
 
     episodeSelect.addEventListener('change', function () {
       if (currentMedia && currentMedia.type === 'tv') {
-        updatePlayerSource();
+        autoSelectWorkingServer();
       }
     });
 
