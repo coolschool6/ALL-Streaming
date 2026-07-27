@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ALLStreaming - Key Manager</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    body { background: #0f0f11; color: #fff; font-family: 'Inter', sans-serif; padding: 20px; }
+    .admin-container { max-width: 800px; margin: 40px auto; background: #18181b; padding: 30px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); }
+    h1 { color: var(--accent); margin-bottom: 20px; }
+    .form-group { margin-bottom: 15px; }
+    label { display: block; margin-bottom: 5px; color: #aaa; font-size: 14px; }
+    input, select { width: 100%; padding: 10px; background: #27272a; border: 1px solid #3f3f46; border-radius: 6px; color: #fff; }
+    button { background: #e50914; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: 600; }
+    button:hover { opacity: 0.9; }
+    table { width: 100%; margin-top: 20px; border-collapse: collapse; text-align: left; }
+    th, td { padding: 12px; border-bottom: 1px solid #27272a; font-size: 14px; }
+    th { color: #aaa; }
+    .status-active { color: #25d366; font-weight: 600; }
+    .status-expired { color: #ff4d4d; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="admin-container">
+    <h1>🔑 Key Management Dashboard</h1>
+    
+    <div class="form-group">
+      <label for="new-key-name">Custom Key Name / Code (e.g., TT-JOHN-555)</label>
+      <input type="text" id="new-key-name" placeholder="Enter key code...">
+    </div>
+    
+    <div class="form-group">
+      <label for="key-duration">Duration (Days)</label>
+      <input type="number" id="key-duration" value="30" min="1">
+    </div>
+    
+    <button id="btn-create-key">Generate & Save Key</button>
+
+    <hr style="border: 0; border-top: 1px solid #27272a; margin: 30px 0;">
+
+    <h2>Active Keys Database</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Key Code</th>
+          <th>Expires In / Date</th>
+          <th>Status</th>
+          <th>Action</th>
+        </tr>
+      <tbody id="keys-table-body">
+        <!-- Injected via JS -->
+      </tbody>
+    </table>
+  </div>
+
+  <script>
+    // Uses localStorage to persist keys across your browser session
+    function getStoredKeys() {
+      var data = localStorage.getItem('asfr_admin_keys');
+      return data ? JSON.parse(data) : {
+        "TT-TEST-KEY-123": Date.now() + (30 * 24 * 60 * 60 * 1000)
+      };
+    }
+
+    function saveStoredKeys(keys) {
+      localStorage.setItem('asfr_admin_keys', JSON.stringify(keys));
+    }
+
+    function renderTable() {
+      var keys = getStoredKeys();
+      var tbody = document.getElementById('keys-table-body');
+      tbody.innerHTML = '';
+
+      var now = Date.now();
+
+      for (var key in keys) {
+        var expiryTime = keys[key];
+        var isExpired = now > expiryTime;
+        var timeLeftMs = expiryTime - now;
+        var daysLeft = Math.ceil(timeLeftMs / (1000 * 60 * 60 * 24));
+
+        var tr = document.createElement('tr');
+        
+        var tdKey = document.createElement('td');
+        tdKey.textContent = key;
+        tr.appendChild(tdKey);
+
+        var tdTime = document.createElement('td');
+        tdTime.textContent = isExpired ? 'Expired' : daysLeft + ' days left (' + new Date(expiryTime).toLocaleDateString() + ')';
+        tr.appendChild(tdTime);
+
+        var tdStatus = document.createElement('td');
+        tdStatus.className = isExpired ? 'status-expired' : 'status-active';
+        tdStatus.textContent = isExpired ? 'Expired' : 'Active';
+        tr.appendChild(tdStatus);
+
+        var tdAction = document.createElement('td');
+        var delBtn = document.createElement('button');
+        delBtn.textContent = 'Revoke';
+        delBtn.style.background = '#3f3f46';
+        delBtn.style.padding = '5px 10px';
+        delBtn.setAttribute('data-key', key);
+        delBtn.onclick = function() {
+          var k = this.getAttribute('data-key');
+          var allKeys = getStoredKeys();
+          delete allKeys[k];
+          saveStoredKeys(allKeys);
+          renderTable();
+        };
+        tdAction.appendChild(delBtn);
+        tr.appendChild(tdAction);
+
+        tbody.appendChild(tr);
+      }
+    }
+
+    document.getElementById('btn-create-key').addEventListener('click', function() {
+      var keyInput = document.getElementById('new-key-name');
+      var durationInput = document.getElementById('key-duration');
+      
+      var keyName = keyInput.value.trim();
+      var days = parseInt(durationInput.value, 10) || 30;
+
+      if (!keyName) {
+        alert('Please enter a key name.');
+        return;
+      }
+
+      var keys = getStoredKeys();
+      var expiryTimestamp = Date.now() + (days * 24 * 60 * 60 * 1000);
+      
+      keys[keyName] = expiryTimestamp;
+      saveStoredKeys(keys);
+
+      keyInput.value = '';
+      renderTable();
+      alert('Key successfully generated!');
+    });
+
+    renderTable();
+  </script>
+</body>
+</html>
