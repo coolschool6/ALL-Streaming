@@ -372,6 +372,9 @@
     var title = item.title || item.name || '';
     playerTitle.textContent = title;
 
+    playerModal.classList.add('active');
+    document.body.style.overflow = 'hidden';
+
     if (mediaType === 'tv') {
       tvControls.style.display = 'flex';
       loadTVSeasons(item.id, item);
@@ -379,9 +382,6 @@
       tvControls.style.display = 'none';
       loadPlayer(VIDCORE + 'movie/' + item.id + '?autoPlay=true');
     }
-
-    playerModal.classList.add('active');
-    document.body.style.overflow = 'hidden';
   }
 
   function loadPlayer(url) {
