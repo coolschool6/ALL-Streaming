@@ -3,14 +3,23 @@
 
   // ===== ADMIN DASHBOARD SYSTEM =====
   function getActiveKeys() {
-    var data = localStorage.getItem('asfr_admin_keys');
-    return data ? JSON.parse(data) : {
-      "TT-TEST-KEY-123": { expiry: Date.now() + (30 * 24 * 60 * 60 * 1000), label: "Test Account" }
-    };
+    try {
+      var data = localStorage.getItem('asfr_admin_keys');
+      return data ? JSON.parse(data) : {
+        "TT-TEST-KEY-123": { expiry: Date.now() + (30 * 24 * 60 * 60 * 1000), label: "Test Account" }
+      };
+    } catch (e) {
+      console.error('Admin Panel: Error reading localStorage', e);
+      return {};
+    }
   }
 
   function saveActiveKeys(keys) {
-    localStorage.setItem('asfr_admin_keys', JSON.stringify(keys));
+    try {
+      localStorage.setItem('asfr_admin_keys', JSON.stringify(keys));
+    } catch (e) {
+      console.error('Admin Panel: Error saving to localStorage', e);
+    }
   }
 
   function renderAdminPanel() {
@@ -44,7 +53,14 @@
 
     container.appendChild(toggleBtn);
     container.appendChild(panel);
-    document.body.appendChild(container);
+    
+    if (document.body) {
+      document.body.appendChild(container);
+    } else {
+      document.addEventListener('DOMContentLoaded', function() {
+        document.body.appendChild(container);
+      });
+    }
 
     toggleBtn.addEventListener('click', function () {
       var isVisible = panel.style.display === 'block';
@@ -119,8 +135,7 @@
     }
   }
 
-  window.addEventListener('DOMContentLoaded', function () {
-    renderAdminPanel();
-  });
+  // Execute immediately
+  renderAdminPanel();
 
 })();
