@@ -1,6 +1,58 @@
 (function () {
   'use strict';
 
+  // ===== MANUAL KEY PAYWALL SYSTEM =====
+  var VALID_KEYS = {
+    "TT-TEST-KEY-123": Date.now() + (30 * 24 * 60 * 60 * 1000) // 30 days testing key
+  };
+
+  function checkPaywall() {
+    var overlay = document.getElementById('paywall-overlay');
+    if (!overlay) return;
+
+    var savedKey = localStorage.getItem('asfr_access_key');
+    var expiryTime = localStorage.getItem('asfr_expiry_time');
+    var now = Date.now();
+
+    if (savedKey && expiryTime && now < parseInt(expiryTime, 10)) {
+      overlay.style.display = 'none';
+      return; 
+    }
+
+    overlay.style.display = 'flex';
+  }
+
+  function setupPaywallEvents() {
+    var activateBtn = document.getElementById('btn-activate');
+    var keyInput = document.getElementById('key-input');
+    var errorMsg = document.getElementById('paywall-error');
+
+    if (!activateBtn || !keyInput) return;
+
+    activateBtn.addEventListener('click', function () {
+      var enteredKey = keyInput.value.trim();
+      
+      if (VALID_KEYS[enteredKey]) {
+        var expiry = VALID_KEYS[enteredKey];
+        localStorage.setItem('asfr_access_key', enteredKey);
+        localStorage.setItem('asfr_expiry_time', expiry);
+        
+        document.getElementById('paywall-overlay').style.display = 'none';
+        alert('Access granted for 30 days!');
+      } else {
+        errorMsg.textContent = 'Invalid key. Contact WhatsApp to purchase a valid key.';
+      }
+    });
+  }
+
+  // Run paywall protection check immediately on load
+  window.addEventListener('DOMContentLoaded', function () {
+    checkPaywall();
+    setupPaywallEvents();
+  });
+
+
+  // ===== STREAMING PLATFORM ENGINE =====
   var API_KEY = 'cd27a14dfc1752e04b474124a5af6d2b';
   var BASE = 'https://api.themoviedb.org/3';
   var IMG = 'https://image.tmdb.org/t/p/';

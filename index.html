@@ -86,9 +86,98 @@
     </div>
   </div>
 
-  <footer class="footer">
-    <p>Data provided by <a href="https://www.themoviedb.org/" target="_blank" rel="noopener">TMDB</a>. This product uses the TMDB API but is not endorsed or certified by TMDB.</p>
-  </footer>
+  <!-- MANUAL PAYWALL MODAL -->
+  <div id="paywall-overlay" class="paywall-modal" style="display: none;">
+    <div class="paywall-content">
+      <h2>🔒 ALLStreaming Access</h2>
+      <p>This service costs <strong>100 TTD / month</strong>.</p>
+      <p class="paywall-instructions">
+        To get your 30-day key, pay via bank transfer and send proof via WhatsApp.
+      </p>
+      
+      <input type="text" id="key-input" placeholder="Enter your 30-day key..." autocomplete="off" />
+      <button id="btn-activate" class="btn-watch" style="width:100%; margin-bottom: 12px;">Activate Key</button>
+      
+      <a href="https://wa.me/1868YOURNUMBER?text=Hi,%20I%20want%20to%20buy%20a%2030-day%20access%20key%20for%20ALLStreaming%20(100%20TTD).%20Here%20is%20my%20bank%20transfer%20receipt:" 
+         target="_blank" 
+         class="whatsapp-btn">
+         💬 Buy via WhatsApp (Bank Transfer)
+      </a>
+      
+      <p id="paywall-error" class="paywall-error"></p>
+    </div>
+  </div>
+
+  <style>
+  .paywall-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.92);
+    backdrop-filter: blur(12px);
+    z-index: 100000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .paywall-content {
+    background: #18181b;
+    color: #fff;
+    padding: 32px;
+    border-radius: 12px;
+    width: 90%;
+    max-width: 420px;
+    text-align: center;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+  .paywall-content h2 {
+    font-family: 'Grenze Gotisch', serif;
+    font-size: 28px;
+    margin-bottom: 10px;
+    color: var(--accent);
+  }
+  .paywall-content p {
+    font-size: 14px;
+    color: #aaa;
+    margin-bottom: 16px;
+    line-height: 1.5;
+  }
+  .paywall-content input {
+    width: 100%;
+    padding: 12px;
+    background: #27272a;
+    border: 1px solid #3f3f46;
+    border-radius: 6px;
+    color: #fff;
+    font-size: 15px;
+    text-align: center;
+    margin-bottom: 12px;
+    outline: none;
+  }
+  .paywall-content input:focus {
+    border-color: var(--accent);
+  }
+  .whatsapp-btn {
+    display: block;
+    background: #25d366;
+    color: #fff;
+    padding: 12px;
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 14px;
+    margin-top: 8px;
+    text-decoration: none;
+    transition: opacity 0.2s;
+  }
+  .whatsapp-btn:hover {
+    opacity: 0.9;
+  }
+  .paywall-error {
+    color: #ff4d4d;
+    font-size: 13px;
+    margin-top: 12px;
+  }
+  </style>
 
   <script src="app.js"></script>
 </body>
