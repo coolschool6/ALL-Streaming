@@ -43,7 +43,7 @@
   var searchTimeout = null;
 
   /* ===== AD BLOCKING ===== */
-  var _origOpen = window.open;
+  var _origOpen = window.open.bind(window);
   window.open = function () { return null; };
   window.addEventListener('beforeunload', function (e) {
     if (playerModal && playerModal.classList.contains('active')) {
@@ -380,85 +380,13 @@
 
   /* ===== PLAYER ===== */
   function openPlayer(item, mediaType) {
-    var title = item.title || item.name || '';
-    playerTitle.textContent = title;
-
-    playerModal.classList.add('active');
-    document.body.style.overflow = 'hidden';
-
+    var url;
     if (mediaType === 'tv') {
-      tvControls.style.display = 'flex';
-      loadTVSeasons(item.id, item);
+      url = VIDCORE + 'tv/' + item.id + '/1/1';
     } else {
-      tvControls.style.display = 'none';
-      loadPlayer(VIDCORE + 'movie/' + item.id + '?autoPlay=true');
+      url = VIDCORE + 'movie/' + item.id + '?autoPlay=true';
     }
-  }
-
-  function loadPlayer(url) {
-    playerIframe.src = '';
-    playerIframe.src = url;
-  }
-
-  function closePlayer() {
-    playerModal.classList.remove('active');
-    playerIframe.src = '';
-    document.body.style.overflow = '';
-    tvControls.style.display = 'none';
-  }
-
-  function loadTVSeasons(showId, item) {
-    fetchTMDB('/tv/' + showId + '?language=en-US')
-      .then(function (data) {
-        var seasons = (data.seasons || []).filter(function (s) {
-          return s.season_number > 0 && s.episode_count > 0;
-        });
-
-        seasonSelect.innerHTML = '';
-        for (var i = 0; i < seasons.length; i++) {
-          var opt = document.createElement('option');
-          opt.value = seasons[i].season_number;
-          opt.textContent = 'Season ' + seasons[i].season_number;
-          seasonSelect.appendChild(opt);
-        }
-
-        seasonSelect.onchange = function () {
-          loadTVEpisodes(showId, parseInt(this.value), item);
-        };
-
-        if (seasons.length > 0) {
-          loadTVEpisodes(showId, seasons[0].season_number, item);
-        }
-      })
-      .catch(function () {
-        playerIframe.src = VIDCORE + 'tv/' + showId + '/1/1';
-      });
-  }
-
-  function loadTVEpisodes(showId, seasonNum, item) {
-    fetchTMDB('/tv/' + showId + '/season/' + seasonNum + '?language=en-US')
-      .then(function (data) {
-        var episodes = data.episodes || [];
-
-        episodeSelect.innerHTML = '';
-        for (var i = 0; i < episodes.length; i++) {
-          var opt = document.createElement('option');
-          opt.value = episodes[i].episode_number;
-          opt.textContent = 'E' + episodes[i].episode_number + (episodes[i].name ? ' - ' + episodes[i].name : '');
-          episodeSelect.appendChild(opt);
-        }
-
-        episodeSelect.onchange = function () {
-          loadPlayer(VIDCORE + 'tv/' + showId + '/' + seasonNum + '/' + this.value);
-        };
-
-        if (episodes.length > 0) {
-          loadPlayer(VIDCORE + 'tv/' + showId + '/' + seasonNum + '/1');
-        }
-      })
-      .catch(function () {
-        playerIframe.src = VIDCORE + 'tv/' + showId + '/' + seasonNum + '/1';
-      });
+    _origOpen(url, '_blank');
   }
 
   /* ===== SEARCH ===== */
@@ -636,12 +564,7 @@
       });
     }
 
-    playerClose.addEventListener('click', closePlayer);
     detailClose.addEventListener('click', closeDetail);
-
-    playerModal.addEventListener('click', function (e) {
-      if (e.target === playerModal) closePlayer();
-    });
 
     detailModal.addEventListener('click', function (e) {
       if (e.target === detailModal || e.target.classList.contains('detail-overlay')) closeDetail();
@@ -649,8 +572,7 @@
 
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape') {
-        if (playerModal.classList.contains('active')) closePlayer();
-        else if (detailModal.classList.contains('active')) closeDetail();
+        if (detailModal.classList.contains('active')) closeDetail();
         else if (searchBar.classList.contains('active')) {
           searchBar.classList.remove('active');
           searchInput.value = '';
