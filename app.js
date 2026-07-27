@@ -2,9 +2,12 @@
   'use strict';
 
   // ===== MANUAL KEY PAYWALL SYSTEM =====
-  var VALID_KEYS = {
-    "TT-TEST-KEY-123": Date.now() + (30 * 24 * 60 * 60 * 1000) // 30 days testing key
-  };
+  function getActiveKeys() {
+    var data = localStorage.getItem('asfr_admin_keys');
+    return data ? JSON.parse(data) : {
+      "TT-TEST-KEY-123": Date.now() + (30 * 24 * 60 * 60 * 1000)
+    };
+  }
 
   function checkPaywall() {
     var overlay = document.getElementById('paywall-overlay');
@@ -13,13 +16,24 @@
     var savedKey = localStorage.getItem('asfr_access_key');
     var expiryTime = localStorage.getItem('asfr_expiry_time');
     var now = Date.now();
+    var validKeys = getActiveKeys();
 
-    if (savedKey && expiryTime && now < parseInt(expiryTime, 10)) {
+    // STRICT VALIDATION: Check if key exists, exists in admin keys, isn't revoked, and hasn't expired locally or globally
+    var isKeyValid = savedKey && 
+                     expiryTime && 
+                     validKeys[savedKey] && 
+                     now < parseInt(expiryTime, 10) && 
+                     now < parseInt(validKeys[savedKey], 10);
+
+    if (isKeyValid) {
+      // Access allowed, keep overlay hidden
       overlay.style.display = 'none';
-      return; 
+    } else {
+      // Lock out: clear out outdated/revoked local tokens and force paywall open
+      localStorage.removeItem('asfr_access_key');
+      localStorage.removeItem('asfr_expiry_time');
+      overlay.style.display = 'flex';
     }
-
-    overlay.style.display = 'flex';
   }
 
   function setupPaywallEvents() {
@@ -31,14 +45,23 @@
 
     activateBtn.addEventListener('click', function () {
       var enteredKey = keyInput.value.trim();
+      var validKeys = getActiveKeys();
       
-      if (VALID_KEYS[enteredKey]) {
-        var expiry = VALID_KEYS[enteredKey];
+      if (validKeys[enteredKey]) {
+        var expiry = validKeys[enteredKey];
+        
+        if (Date.now() > expiry) {
+          errorMsg.textContent = 'This key has expired.';
+          return;
+        }
+
+        // Save active key and its precise expiration timestamp
         localStorage.setItem('asfr_access_key', enteredKey);
         localStorage.setItem('asfr_expiry_time', expiry);
         
         document.getElementById('paywall-overlay').style.display = 'none';
         alert('Access granted for 30 days!');
+        window.location.reload(); // Refresh to securely initialize player state
       } else {
         errorMsg.textContent = 'Invalid key. Contact WhatsApp to purchase a valid key.';
       }
