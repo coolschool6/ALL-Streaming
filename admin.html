@@ -1,129 +1,144 @@
-(function () {
-  'use strict';
-
-  // ===== ADMIN DASHBOARD SYSTEM =====
-  function getActiveKeys() {
-    var data = localStorage.getItem('asfr_admin_keys');
-    return data ? JSON.parse(data) : {
-      "TT-TEST-KEY-123": { expiry: Date.now() + (30 * 24 * 60 * 60 * 1000), label: "Test Account" }
-    };
-  }
-
-  function saveActiveKeys(keys) {
-    localStorage.setItem('asfr_admin_keys', JSON.stringify(keys));
-  }
-
-  function renderAdminPanel() {
-    if (document.getElementById('admin-panel-container')) return;
-
-    var container = document.createElement('div');
-    container.id = 'admin-panel-container';
-    container.style.cssText = 'position:fixed; bottom:20px; right:20px; z-index:99999; font-family:sans-serif;';
-
-    var toggleBtn = document.createElement('button');
-    toggleBtn.id = 'admin-toggle-btn';
-    toggleBtn.textContent = '⚙️ Admin Panel';
-    toggleBtn.style.cssText = 'background:#e50914; color:#fff; border:none; padding:10px 15px; border-radius:5px; cursor:pointer; font-weight:bold; box-shadow:0 4px 10px rgba(0,0,0,0.3);';
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ALLStreaming - Key Manager</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    body { background: #0f0f11; color: #fff; font-family: 'Inter', sans-serif; padding: 20px; }
+    .admin-container { max-width: 800px; margin: 40px auto; background: #18181b; padding: 30px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); }
+    h1 { color: var(--accent); margin-bottom: 20px; }
+    .form-group { margin-bottom: 15px; }
+    label { display: block; margin-bottom: 5px; color: #aaa; font-size: 14px; }
+    input, select { width: 100%; padding: 10px; background: #27272a; border: 1px solid #3f3f46; border-radius: 6px; color: #fff; }
+    button { background: #e50914; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: 600; }
+    button:hover { opacity: 0.9; }
+    table { width: 100%; margin-top: 20px; border-collapse: collapse; text-align: left; }
+    th, td { padding: 12px; border-bottom: 1px solid #27272a; font-size: 14px; }
+    th { color: #aaa; }
+    .status-active { color: #25d366; font-weight: 600; }
+    .status-expired { color: #ff4d4d; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="admin-container">
+    <h1>🔑 Key Management Dashboard</h1>
     
-    var panel = document.createElement('div');
-    panel.id = 'admin-panel-box';
-    panel.style.cssText = 'display:none; position:absolute; bottom:50px; right:0; width:350px; background:#181818; color:#fff; border:1px solid #333; border-radius:8px; padding:20px; box-shadow:0 8px 24px rgba(0,0,0,0.5);';
+    <div class="form-group">
+      <label for="new-key-name">Custom Key Name / Code (e.g., TT-JOHN-555)</label>
+      <input type="text" id="new-key-name" placeholder="Enter key code...">
+    </div>
+    
+    <div class="form-group">
+      <label for="key-duration">Duration (Days)</label>
+      <input type="number" id="key-duration" value="30" min="1">
+    </div>
+    
+    <button id="btn-create-key">Generate & Save Key</button>
 
-    panel.innerHTML = `
-      <h3 style="margin-top:0; font-size:18px; border-bottom:1px solid #333; padding-bottom:10px;">Key Management</h3>
-      <div style="margin-bottom:15px;">
-        <label style="font-size:12px; color:#aaa; display:block; margin-bottom:5px;">Key Label / User Name</label>
-        <input type="text" id="admin-key-label" placeholder="e.g., John Doe" style="width:100%; padding:8px; background:#222; border:1px solid #444; color:#fff; border-radius:4px; box-sizing:border-box;">
-      </div>
-      <div style="margin-bottom:15px;">
-        <label style="font-size:12px; color:#aaa; display:block; margin-bottom:5px;">Duration (Days)</label>
-        <input type="number" id="admin-key-days" value="30" style="width:100%; padding:8px; background:#222; border:1px solid #444; color:#fff; border-radius:4px; box-sizing:border-box;">
-      </div>
-      <button id="admin-generate-btn" style="width:100%; background:#28a745; color:#fff; border:none; padding:10px; border-radius:4px; cursor:pointer; font-weight:bold; margin-bottom:15px;">Generate New Key</button>
-      
-      <h4 style="font-size:14px; margin:10px 0 5px 0; border-bottom:1px solid #333; padding-bottom:5px;">Active Keys List</h4>
-      <div id="admin-keys-list" style="max-height:180px; overflow-y:auto; font-size:12px;"></div>
-    `;
+    <hr style="border: 0; border-top: 1px solid #27272a; margin: 30px 0;">
 
-    container.appendChild(toggleBtn);
-    container.appendChild(panel);
-    document.body.appendChild(container);
+    <h2>Active Keys Database</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Key Code</th>
+          <th>Expires In / Date</th>
+          <th>Status</th>
+          <th>Action</th>
+        </tr>
+      <tbody id="keys-table-body">
+        <!-- Injected via JS -->
+      </tbody>
+    </table>
+  </div>
 
-    toggleBtn.addEventListener('click', function () {
-      var isVisible = panel.style.display === 'block';
-      panel.style.display = isVisible ? 'none' : 'block';
-      if (!isVisible) loadKeysTable();
-    });
-
-    document.getElementById('admin-generate-btn').addEventListener('click', function () {
-      var labelInput = document.getElementById('admin-key-label');
-      var daysInput = document.getElementById('admin-key-days');
-      
-      var label = labelInput.value.trim() || 'Standard User';
-      var days = parseInt(daysInput.value, 10) || 30;
-      var randomHex = Math.random().toString(36).substring(2, 8).toUpperCase();
-      var newKey = 'ASFR-' + randomHex + '-' + Math.floor(1000 + Math.random() * 9000);
-      
-      var keys = getActiveKeys();
-      keys[newKey] = {
-        expiry: Date.now() + (days * 24 * 60 * 60 * 1000),
-        label: label
+  <script>
+    // Uses localStorage to persist keys across your browser session
+    function getStoredKeys() {
+      var data = localStorage.getItem('asfr_admin_keys');
+      return data ? JSON.parse(data) : {
+        "TT-TEST-KEY-123": Date.now() + (30 * 24 * 60 * 60 * 1000)
       };
+    }
+
+    function saveStoredKeys(keys) {
+      localStorage.setItem('asfr_admin_keys', JSON.stringify(keys));
+    }
+
+    function renderTable() {
+      var keys = getStoredKeys();
+      var tbody = document.getElementById('keys-table-body');
+      tbody.innerHTML = '';
+
+      var now = Date.now();
+
+      for (var key in keys) {
+        var expiryTime = keys[key];
+        var isExpired = now > expiryTime;
+        var timeLeftMs = expiryTime - now;
+        var daysLeft = Math.ceil(timeLeftMs / (1000 * 60 * 60 * 24));
+
+        var tr = document.createElement('tr');
+        
+        var tdKey = document.createElement('td');
+        tdKey.textContent = key;
+        tr.appendChild(tdKey);
+
+        var tdTime = document.createElement('td');
+        tdTime.textContent = isExpired ? 'Expired' : daysLeft + ' days left (' + new Date(expiryTime).toLocaleDateString() + ')';
+        tr.appendChild(tdTime);
+
+        var tdStatus = document.createElement('td');
+        tdStatus.className = isExpired ? 'status-expired' : 'status-active';
+        tdStatus.textContent = isExpired ? 'Expired' : 'Active';
+        tr.appendChild(tdStatus);
+
+        var tdAction = document.createElement('td');
+        var delBtn = document.createElement('button');
+        delBtn.textContent = 'Revoke';
+        delBtn.style.background = '#3f3f46';
+        delBtn.style.padding = '5px 10px';
+        delBtn.setAttribute('data-key', key);
+        delBtn.onclick = function() {
+          var k = this.getAttribute('data-key');
+          var allKeys = getStoredKeys();
+          delete allKeys[k];
+          saveStoredKeys(allKeys);
+          renderTable();
+        };
+        tdAction.appendChild(delBtn);
+        tr.appendChild(tdAction);
+
+        tbody.appendChild(tr);
+      }
+    }
+
+    document.getElementById('btn-create-key').addEventListener('click', function() {
+      var keyInput = document.getElementById('new-key-name');
+      var durationInput = document.getElementById('key-duration');
       
-      saveActiveKeys(keys);
-      labelInput.value = '';
-      loadKeysTable();
-      alert('Generated Key: ' + newKey);
-    });
-  }
+      var keyName = keyInput.value.trim();
+      var days = parseInt(durationInput.value, 10) || 30;
 
-  function loadKeysTable() {
-    var listContainer = document.getElementById('admin-keys-list');
-    if (!listContainer) return;
+      if (!keyName) {
+        alert('Please enter a key name.');
+        return;
+      }
 
-    var keys = getActiveKeys();
-    var html = '';
-    var now = Date.now();
+      var keys = getStoredKeys();
+      var expiryTimestamp = Date.now() + (days * 24 * 60 * 60 * 1000);
+      
+      keys[keyName] = expiryTimestamp;
+      saveStoredKeys(keys);
 
-    var keyEntries = Object.keys(keys);
-    if (keyEntries.length === 0) {
-      listContainer.innerHTML = '<div style="color:#777; padding:10px 0;">No active keys found.</div>';
-      return;
-    }
-
-    keyEntries.forEach(function (k) {
-      var record = keys[k];
-      var expiry = typeof record === 'object' ? record.expiry : record;
-      var label = typeof record === 'object' ? record.label : 'Legacy Key';
-      var timeLeftDays = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
-      var isExpired = now > expiry;
-
-      html += '<div style="background:#222; padding:8px; margin-bottom:8px; border-radius:4px; display:flex; justify-content:space-between; align-items:center;">';
-      html += '<div>';
-      html += '<strong style="color:#fff;">' + k + '</strong><br>';
-      html += '<span style="color:#aaa;">' + label + '</span> | ';
-      html += '<span style="color:' + (isExpired ? '#e50914' : '#28a745') + ';">' + (isExpired ? 'Expired' : timeLeftDays + ' days left') + '</span>';
-      html += '</div>';
-      html += '<button data-key="' + k + '" class="admin-delete-btn" style="background:#dc3545; color:#fff; border:none; padding:4px 8px; border-radius:3px; cursor:pointer;">Revoke</button>';
-      html += '</div>';
+      keyInput.value = '';
+      renderTable();
+      alert('Key successfully generated!');
     });
 
-    listContainer.innerHTML = html;
-
-    var deleteBtns = listContainer.querySelectorAll('.admin-delete-btn');
-    for (var i = 0; i < deleteBtns.length; i++) {
-      deleteBtns[i].addEventListener('click', function () {
-        var keyToRemove = this.getAttribute('data-key');
-        var currentKeys = getActiveKeys();
-        delete currentKeys[keyToRemove];
-        saveActiveKeys(currentKeys);
-        loadKeysTable();
-      });
-    }
-  }
-
-  window.addEventListener('DOMContentLoaded', function () {
-    renderAdminPanel();
-  });
-
-})();
+    renderTable();
+  </script>
+</body>
+</html>
