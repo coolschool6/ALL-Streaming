@@ -4,8 +4,14 @@
   var API_KEY = 'cd27a14dfc1752e04b474124a5af6d2b';
   var BASE = 'https://api.themoviedb.org/3';
   var IMG = 'https://image.tmdb.org/t/p/';
-  // Updated embed provider to bypass connection refusals
-  var EMBED_URL = 'https://vidsrc.cc/v2/embed/';
+
+  // Multi-server fallback options
+  var SERVERS = [
+    { name: 'Server 1 (VidLink)', movie: 'https://vidlink.pro/movie/', tv: 'https://vidlink.pro/tv/' },
+    { name: 'Server 2 (VidSrc Pro)', movie: 'https://vidsrc.pro/embed/movie/', tv: 'https://vidsrc.pro/embed/tv/' },
+    { name: 'Server 3 (EmbedSu)', movie: 'https://embed.su/embed/movie/', tv: 'https://embed.su/embed/tv/' },
+    { name: 'Server 4 (VidSrc CC)', movie: 'https://vidsrc.cc/v2/embed/movie/', tv: 'https://vidsrc.cc/v2/embed/tv/' }
+  ];
 
   var content = document.getElementById('content');
   var loading = document.getElementById('loading');
@@ -37,6 +43,7 @@
   var searchClose = document.getElementById('searchClose') || document.getElementById('search-close');
   var navBtns = document.querySelectorAll('.nav-btn');
 
+  var serverSelect = null;
   var heroItems = [];
   var heroIndex = 0;
   var heroInterval = null;
@@ -44,21 +51,41 @@
   var searchTimeout = null;
   var currentMedia = null;
 
-  /* ===== AD & POPUP BLOCKING ===== */
-  var _origOpen = window.open.bind(window);
-  window.open = function () { return null; };
-  window.addEventListener('beforeunload', function (e) {
-    if (playerModal && playerModal.classList.contains('active')) {
-      e.preventDefault();
-      e.returnValue = '';
+  /* ===== SAFE POPUP SUPPRESSION ===== */
+  window.open = function () {
+    return {
+      focus: function () {},
+      blur: function () {},
+      close: function () {}
+    };
+  };
+
+  /* ===== DYNAMIC SERVER SELECTOR UI ===== */
+  function initServerSelector() {
+    if (document.getElementById('server-select')) {
+      serverSelect = document.getElementById('server-select');
+      return;
     }
-  });
-  document.addEventListener('click', function (e) {
-    var link = e.target.closest('a[target="_blank"]');
-    if (link && !link.closest('.player-modal')) {
-      e.preventDefault();
+    serverSelect = document.createElement('select');
+    serverSelect.id = 'server-select';
+    serverSelect.style.cssText = 'background:#1f1f1f; color:#fff; border:1px solid #333; padding:6px 12px; border-radius:4px; margin-left:12px; cursor:pointer; font-size:13px; font-weight:600;';
+
+    SERVERS.forEach(function (s, idx) {
+      var opt = document.createElement('option');
+      opt.value = idx;
+      opt.textContent = s.name;
+      serverSelect.appendChild(opt);
+    });
+
+    var header = playerModal.querySelector('.player-header') || playerModal.querySelector('.modal-header') || playerModal.firstElementChild;
+    if (header) {
+      header.appendChild(serverSelect);
     }
-  }, true);
+
+    serverSelect.addEventListener('change', function () {
+      updatePlayerSource();
+    });
+  }
 
   function fetchTMDB(endpoint) {
     var sep = endpoint.indexOf('?') === -1 ? '?' : '&';
@@ -372,19 +399,45 @@
 
   /* ===== PLAYER ENGINE ===== */
   function openPlayer(item, mediaType) {
+    initServerSelector();
     currentMedia = { item: item, type: mediaType };
     playerTitle.textContent = item.title || item.name || '';
+
+    // Force iframe visibility and styling
+    playerIframe.setAttribute('allow', 'autoplay; encrypted-media; fullscreen; picture-in-picture');
+    playerIframe.setAttribute('allowfullscreen', 'true');
+    playerIframe.style.width = '100%';
+    playerIframe.style.height = '100%';
+    playerIframe.style.minHeight = '500px';
+    playerIframe.style.border = '0';
+    playerIframe.style.display = 'block';
 
     if (mediaType === 'tv') {
       tvControls.style.display = 'flex';
       setupTVControls(item.id);
     } else {
       tvControls.style.display = 'none';
-      playerIframe.src = EMBED_URL + 'movie/' + item.id;
+      updatePlayerSource();
     }
 
     playerModal.classList.add('active');
     document.body.style.overflow = 'hidden';
+  }
+
+  function updatePlayerSource() {
+    if (!currentMedia) return;
+    var idx = parseInt(serverSelect ? serverSelect.value : '0', 10) || 0;
+    var server = SERVERS[idx] || SERVERS[0];
+    var item = currentMedia.item;
+    var type = currentMedia.type;
+
+    if (type === 'tv') {
+      var sNum = seasonSelect.value || 1;
+      var eNum = episodeSelect.value || 1;
+      playerIframe.src = server.tv + item.id + '/' + sNum + '/' + eNum;
+    } else {
+      playerIframe.src = server.movie + item.id;
+    }
   }
 
   function closePlayer() {
@@ -435,7 +488,7 @@
 
         if (!episodes.length) {
           episodeSelect.innerHTML = '<option value="1">Episode 1</option>';
-          loadTVEpisode(tvId, seasonNum, 1);
+          updatePlayerSource();
           return;
         }
 
@@ -447,16 +500,12 @@
         });
 
         episodeSelect.value = 1;
-        loadTVEpisode(tvId, seasonNum, 1);
+        updatePlayerSource();
       })
       .catch(function () {
         episodeSelect.innerHTML = '<option value="1">Episode 1</option>';
-        loadTVEpisode(tvId, seasonNum, 1);
+        updatePlayerSource();
       });
-  }
-
-  function loadTVEpisode(tvId, seasonNum, epNum) {
-    playerIframe.src = EMBED_URL + 'tv/' + tvId + '/' + seasonNum + '/' + epNum;
   }
 
   /* ===== SEARCH ===== */
@@ -608,7 +657,7 @@
       content.appendChild(rowsFragment);
 
       setFilter(currentFilter);
-    }).catch(function (err) {
+    }).catch(function () {
       loading.innerHTML = '<div class="search-empty">Failed to load content. Please refresh the page.</div>';
     });
 
@@ -620,7 +669,7 @@
 
     episodeSelect.addEventListener('change', function () {
       if (currentMedia && currentMedia.type === 'tv') {
-        loadTVEpisode(currentMedia.item.id, seasonSelect.value, this.value);
+        updatePlayerSource();
       }
     });
 
