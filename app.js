@@ -5,12 +5,44 @@
   var BASE = 'https://api.themoviedb.org/3';
   var IMG = 'https://image.tmdb.org/t/p/';
 
-  // Multi-server fallback options
+  // Active multi-server provider list with flexible URL formatting rules
   var SERVERS = [
-    { name: 'Server 1 (VidLink)', movie: 'https://vidlink.pro/movie/', tv: 'https://vidlink.pro/tv/' },
-    { name: 'Server 2 (VidSrc Pro)', movie: 'https://vidsrc.pro/embed/movie/', tv: 'https://vidsrc.pro/embed/tv/' },
-    { name: 'Server 3 (EmbedSu)', movie: 'https://embed.su/embed/movie/', tv: 'https://embed.su/embed/tv/' },
-    { name: 'Server 4 (VidSrc CC)', movie: 'https://vidsrc.cc/v2/embed/movie/', tv: 'https://vidsrc.cc/v2/embed/tv/' }
+    {
+      name: 'Server 1 (AutoEmbed)',
+      type: 'path',
+      movie: 'https://player.autoembed.cc/embed/movie/',
+      tv: 'https://player.autoembed.cc/embed/tv/'
+    },
+    {
+      name: 'Server 2 (VidSrc.xyz)',
+      type: 'query',
+      movie: 'https://vidsrc.xyz/embed/movie?tmdb=',
+      tv: 'https://vidsrc.xyz/embed/tv?tmdb='
+    },
+    {
+      name: 'Server 3 (VidSrc.me)',
+      type: 'query',
+      movie: 'https://vidsrc.me/embed/movie?tmdb=',
+      tv: 'https://vidsrc.me/embed/tv?tmdb='
+    },
+    {
+      name: 'Server 4 (2Embed)',
+      type: '2embed',
+      movie: 'https://www.2embed.cc/embed/',
+      tv: 'https://www.2embed.cc/embedtv/'
+    },
+    {
+      name: 'Server 5 (SmashyStream)',
+      type: 'query',
+      movie: 'https://embed.smashystream.com/playere.php?tmdb=',
+      tv: 'https://embed.smashystream.com/playere.php?tmdb='
+    },
+    {
+      name: 'Server 6 (VidLink)',
+      type: 'path',
+      movie: 'https://vidlink.pro/movie/',
+      tv: 'https://vidlink.pro/tv/'
+    }
   ];
 
   var content = document.getElementById('content');
@@ -397,15 +429,34 @@
     document.body.style.overflow = '';
   }
 
+  /* ===== URL BUILDER HELPER ===== */
+  function buildEmbedURL(server, mediaType, id, season, episode) {
+    season = season || 1;
+    episode = episode || 1;
+
+    if (mediaType === 'movie') {
+      return server.movie + id;
+    }
+
+    if (server.type === 'query') {
+      return server.tv + id + '&season=' + season + '&episode=' + episode;
+    } else if (server.type === '2embed') {
+      return server.tv + id + '&s=' + season + '&e=' + episode;
+    } else {
+      return server.tv + id + '/' + season + '/' + episode;
+    }
+  }
+
   /* ===== PLAYER ENGINE ===== */
   function openPlayer(item, mediaType) {
     initServerSelector();
     currentMedia = { item: item, type: mediaType };
     playerTitle.textContent = item.title || item.name || '';
 
-    // Force iframe visibility and styling
+    // Force iframe attributes for cross-origin playback compatibility
     playerIframe.setAttribute('allow', 'autoplay; encrypted-media; fullscreen; picture-in-picture');
     playerIframe.setAttribute('allowfullscreen', 'true');
+    playerIframe.setAttribute('referrerpolicy', 'origin');
     playerIframe.style.width = '100%';
     playerIframe.style.height = '100%';
     playerIframe.style.minHeight = '500px';
@@ -431,13 +482,10 @@
     var item = currentMedia.item;
     var type = currentMedia.type;
 
-    if (type === 'tv') {
-      var sNum = seasonSelect.value || 1;
-      var eNum = episodeSelect.value || 1;
-      playerIframe.src = server.tv + item.id + '/' + sNum + '/' + eNum;
-    } else {
-      playerIframe.src = server.movie + item.id;
-    }
+    var sNum = seasonSelect.value || 1;
+    var eNum = episodeSelect.value || 1;
+
+    playerIframe.src = buildEmbedURL(server, type, item.id, sNum, eNum);
   }
 
   function closePlayer() {
