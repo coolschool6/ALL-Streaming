@@ -1,12 +1,10 @@
 (function () {
   'use strict';
 
-  /* ===== CONFIGURATION ===== */
   var API_KEY = 'cd27a14dfc1752e04b474124a5af6d2b';
   var BASE = 'https://api.themoviedb.org/3';
   var IMG = 'https://image.tmdb.org/t/p/';
 
-  // Server list with 2Embed as Default (#1)
   var SERVERS = [
     {
       name: 'Server 1 (2Embed - Default)',
@@ -73,7 +71,7 @@
   var searchToggle = document.getElementById('search-toggle');
   var searchBar = document.getElementById('search-bar');
   var searchInput = document.getElementById('search-input');
-  var searchClose = document.getElementById('searchClose') || document.getElementById('search-close');
+  var searchClose = document.getElementById('search-close') || document.getElementById('searchClose');
   var navBtns = document.querySelectorAll('.nav-btn');
 
   var serverSelect = null;
@@ -84,16 +82,10 @@
   var searchTimeout = null;
   var currentMedia = null;
 
-  /* ===== LIGHTWEIGHT POP-UP SUPPRESSION ===== */
   window.open = function () {
-    return {
-      focus: function () {},
-      blur: function () {},
-      close: function () {}
-    };
+    return { focus: function () {}, blur: function () {}, close: function () {} };
   };
 
-  /* ===== DYNAMIC SERVER SELECTOR UI ===== */
   function initServerSelector() {
     if (document.getElementById('server-select')) {
       serverSelect = document.getElementById('server-select');
@@ -101,7 +93,7 @@
     }
     serverSelect = document.createElement('select');
     serverSelect.id = 'server-select';
-    serverSelect.style.cssText = 'background:#1f1f1f; color:#fff; border:1px solid #333; padding:6px 12px; border-radius:4px; margin-left:12px; cursor:pointer; font-size:13px; font-weight:600;';
+    serverSelect.className = 'tv-select';
 
     SERVERS.forEach(function (s, idx) {
       var opt = document.createElement('option');
@@ -110,10 +102,8 @@
       serverSelect.appendChild(opt);
     });
 
-    var header = playerModal.querySelector('.player-header') || playerModal.querySelector('.modal-header') || playerModal.firstElementChild;
-    if (header) {
-      header.appendChild(serverSelect);
-    }
+    var header = playerModal.querySelector('.player-header');
+    if (header) header.appendChild(serverSelect);
 
     serverSelect.addEventListener('change', function () {
       loadServer(parseInt(this.value, 10) || 0);
@@ -172,12 +162,8 @@
       heroBadge.style.display = 'none';
     }
 
-    btnWatch.onclick = function () {
-      openPlayer(item, item.media_type || 'movie');
-    };
-    btnInfo.onclick = function () {
-      openDetail(item, item.media_type || 'movie');
-    };
+    btnWatch.onclick = function () { openPlayer(item, item.media_type || 'movie'); };
+    btnInfo.onclick = function () { openDetail(item, item.media_type || 'movie'); };
   }
 
   function renderHeroDots() {
@@ -216,7 +202,7 @@
     startHeroRotation();
   }
 
-  /* ===== CHANNELS & APPS ===== */
+  /* ===== CHANNELS ===== */
   var CHANNELS = [
     { name: 'Netflix', logo: 'logos/netflix.png', provider_id: 8 },
     { name: 'Prime Video', logo: 'logos/primevideo.png', provider_id: 9 },
@@ -234,7 +220,6 @@
     var section = document.createElement('div');
     section.className = 'category-row';
     section.setAttribute('data-type', 'all');
-    section.id = 'channels-row';
 
     var header = document.createElement('div');
     header.className = 'row-header';
@@ -251,7 +236,6 @@
       (function(ch) {
         var card = document.createElement('div');
         card.className = 'channel-card';
-        card.style.cursor = 'pointer';
 
         var logoWrap = document.createElement('div');
         logoWrap.className = 'channel-logo';
@@ -263,8 +247,6 @@
         logoWrap.appendChild(img);
 
         card.appendChild(logoWrap);
-
-        // Click to load channel media natively inside page
         card.addEventListener('click', function (e) {
           e.preventDefault();
           loadProviderContent(ch);
@@ -278,7 +260,6 @@
     return section;
   }
 
-  /* ===== NATIVE PROVIDER / CHANNEL CONTENT LOADER ===== */
   function loadProviderContent(channel) {
     clearSearchResults();
     showAllRows(false);
@@ -292,15 +273,12 @@
 
     var h2 = document.createElement('h2');
     h2.className = 'row-title';
-    h2.style.margin = '0';
     h2.textContent = channel.name + ' Titles';
 
     var backBtn = document.createElement('button');
     backBtn.textContent = '← Back to Home';
-    backBtn.style.cssText = 'background:#e50914; color:#fff; border:0; padding:8px 16px; border-radius:4px; font-weight:600; cursor:pointer;';
-    backBtn.onclick = function () {
-      clearSearchResults();
-    };
+    backBtn.className = 'btn btn-secondary';
+    backBtn.onclick = function () { clearSearchResults(); };
 
     headerBox.appendChild(h2);
     headerBox.appendChild(backBtn);
@@ -311,7 +289,6 @@
     section.appendChild(grid);
     content.appendChild(section);
 
-    // Fetch movies & shows from TMDB for this provider
     var region = 'US';
     var pMovies = fetchTMDB('/discover/movie?watch_region=' + region + '&with_watch_providers=' + channel.provider_id + '&sort_by=popularity.desc');
     var pTV = fetchTMDB('/discover/tv?watch_region=' + region + '&with_watch_providers=' + channel.provider_id + '&sort_by=popularity.desc');
@@ -321,7 +298,6 @@
         var movies = (results[0] || []).map(function(m) { m.media_type = 'movie'; return m; });
         var tvs = (results[1] || []).map(function(t) { t.media_type = 'tv'; return t; });
         
-        // Merge & alternate movies and tv shows
         var combined = [];
         var maxLen = Math.max(movies.length, tvs.length);
         for (var i = 0; i < maxLen; i++) {
@@ -339,13 +315,13 @@
         });
       })
       .catch(function () {
-        grid.innerHTML = '<div class="search-empty">Failed to load channel content. Please try again.</div>';
+        grid.innerHTML = '<div class="search-empty">Failed to load content.</div>';
       });
 
     window.scrollTo({ top: 300, behavior: 'smooth' });
   }
 
-  /* ===== ROWS ===== */
+  /* ===== ROWS & CARDS ===== */
   function createCategoryRow(title, items, type, useTopStyle) {
     var section = document.createElement('div');
     section.className = 'category-row';
@@ -361,13 +337,11 @@
 
     var track = document.createElement('div');
     track.className = 'cards-track';
-
     var displayItems = useTopStyle ? items.slice(0, 10) : items;
 
     for (var i = 0; i < displayItems.length; i++) {
       var item = displayItems[i];
       var mediaType = item.media_type || type || 'movie';
-
       if (useTopStyle) {
         track.appendChild(createTopCard(item, mediaType, i + 1));
       } else {
@@ -428,7 +402,7 @@
     card.appendChild(info);
 
     card.addEventListener('click', function () {
-      openPlayer(item, mediaType);
+      openDetail(item, mediaType);
     });
 
     return card;
@@ -454,7 +428,7 @@
     card.appendChild(posterWrap);
 
     card.addEventListener('click', function () {
-      openPlayer(item, mediaType);
+      openDetail(item, mediaType);
     });
 
     return card;
@@ -474,17 +448,9 @@
 
     var metaHTML = '';
     var dateStr = item.release_date || item.first_air_date || '';
-    if (dateStr) {
-      metaHTML += '<span class="badge">' + dateStr.substring(0, 4) + '</span>';
-    }
-    if (item.vote_average && item.vote_average > 0) {
-      metaHTML += '<span class="badge rating-badge">&#9733; ' + item.vote_average.toFixed(1) + '</span>';
-    }
-    if (mediaType === 'tv') {
-      metaHTML += '<span class="badge">TV Show</span>';
-    } else {
-      metaHTML += '<span class="badge">Movie</span>';
-    }
+    if (dateStr) metaHTML += '<span class="badge">' + dateStr.substring(0, 4) + '</span>';
+    if (item.vote_average && item.vote_average > 0) metaHTML += '<span class="badge rating-badge">&#9733; ' + item.vote_average.toFixed(1) + '</span>';
+    metaHTML += '<span class="badge">' + (mediaType === 'tv' ? 'TV Show' : 'Movie') + '</span>';
     detailMeta.innerHTML = metaHTML;
 
     detailOverview.textContent = item.overview || 'No description available.';
@@ -503,37 +469,25 @@
     document.body.style.overflow = '';
   }
 
-  /* ===== URL BUILDER HELPER ===== */
+  /* ===== PLAYER ENGINE ===== */
   function buildEmbedURL(server, mediaType, id, season, episode) {
     season = season || 1;
     episode = episode || 1;
-
-    if (mediaType === 'movie') {
-      return server.movie + id;
-    }
-
-    if (server.type === 'query') {
-      return server.tv + id + '&season=' + season + '&episode=' + episode;
-    } else if (server.type === '2embed') {
-      return server.tv + id + '&s=' + season + '&e=' + episode;
-    } else {
-      return server.tv + id + '/' + season + '/' + episode;
-    }
+    if (mediaType === 'movie') return server.movie + id;
+    if (server.type === 'query') return server.tv + id + '&season=' + season + '&episode=' + episode;
+    if (server.type === '2embed') return server.tv + id + '&s=' + season + '&e=' + episode;
+    return server.tv + id + '/' + season + '/' + episode;
   }
 
-  /* ===== PLAYER ENGINE ===== */
   function openPlayer(item, mediaType) {
     initServerSelector();
     currentMedia = { item: item, type: mediaType };
     playerTitle.textContent = item.title || item.name || '';
 
-    playerIframe.removeAttribute('sandbox');
     playerIframe.setAttribute('allow', 'autoplay; encrypted-media; fullscreen; picture-in-picture');
     playerIframe.setAttribute('allowfullscreen', 'true');
-    playerIframe.setAttribute('referrerpolicy', 'origin');
     playerIframe.style.width = '100%';
     playerIframe.style.height = '100%';
-    playerIframe.style.minHeight = '500px';
     playerIframe.style.border = '0';
     playerIframe.style.display = 'block';
 
@@ -542,25 +496,21 @@
       setupTVControls(item.id);
     } else {
       tvControls.style.display = 'none';
-      loadServer(0); // Default to Server 1 (2Embed)
+      loadServer(0);
     }
 
     playerModal.classList.add('active');
     document.body.style.overflow = 'hidden';
   }
 
-  /* MANUAL SERVER LOADER */
   function loadServer(serverIndex) {
     if (!currentMedia) return;
-
     var item = currentMedia.item;
     var type = currentMedia.type;
     var sNum = seasonSelect.value || 1;
     var eNum = episodeSelect.value || 1;
-
     var server = SERVERS[serverIndex] || SERVERS[0];
     if (serverSelect) serverSelect.value = serverIndex.toString();
-
     playerIframe.src = buildEmbedURL(server, type, item.id, sNum, eNum);
   }
 
@@ -578,23 +528,19 @@
       .then(function (tvData) {
         seasonSelect.innerHTML = '';
         var seasons = (tvData.seasons || []).filter(function(s) { return s.season_number > 0; });
-        
         if (!seasons.length) {
           seasonSelect.innerHTML = '<option value="1">Season 1</option>';
           updateEpisodes(tvId, 1);
           return;
         }
-
         seasons.forEach(function (s) {
           var opt = document.createElement('option');
           opt.value = s.season_number;
           opt.textContent = s.name || ('Season ' + s.season_number);
           seasonSelect.appendChild(opt);
         });
-
-        var firstSeason = seasons[0].season_number;
-        seasonSelect.value = firstSeason;
-        updateEpisodes(tvId, firstSeason);
+        seasonSelect.value = seasons[0].season_number;
+        updateEpisodes(tvId, seasons[0].season_number);
       })
       .catch(function () {
         seasonSelect.innerHTML = '<option value="1">Season 1</option>';
@@ -604,25 +550,21 @@
 
   function updateEpisodes(tvId, seasonNum) {
     episodeSelect.innerHTML = '<option value="">Loading episodes...</option>';
-
     fetchTMDB('/tv/' + tvId + '/season/' + seasonNum)
       .then(function (seasonData) {
         episodeSelect.innerHTML = '';
         var episodes = seasonData.episodes || [];
-
         if (!episodes.length) {
           episodeSelect.innerHTML = '<option value="1">Episode 1</option>';
           loadServer(0);
           return;
         }
-
         episodes.forEach(function (ep) {
           var opt = document.createElement('option');
           opt.value = ep.episode_number;
           opt.textContent = 'E' + ep.episode_number + ' - ' + (ep.name || ('Episode ' + ep.episode_number));
           episodeSelect.appendChild(opt);
         });
-
         episodeSelect.value = 1;
         loadServer(0);
       })
@@ -651,14 +593,11 @@
       clearSearchResults();
       return;
     }
-
     clearTimeout(searchTimeout);
     searchTimeout = setTimeout(function () {
       fetchTMDB('/search/multi?query=' + encodeURIComponent(query) + '&include_adult=false')
         .then(function (results) {
-          var filtered = results.filter(function (r) {
-            return r.media_type === 'movie' || r.media_type === 'tv';
-          });
+          var filtered = results.filter(function (r) { return r.media_type === 'movie' || r.media_type === 'tv'; });
           renderSearchResults(query, filtered);
         });
     }, 400);
@@ -690,7 +629,6 @@
       }
       section.appendChild(grid);
     }
-
     content.appendChild(section);
   }
 
@@ -707,33 +645,21 @@
     }
   }
 
-  /* ===== NAV FILTER ===== */
   function setFilter(filter) {
     currentFilter = filter;
-
     for (var i = 0; i < navBtns.length; i++) {
       navBtns[i].classList.toggle('active', navBtns[i].getAttribute('data-filter') === filter);
     }
-
     var rows = content.querySelectorAll('.category-row');
     for (var j = 0; j < rows.length; j++) {
       var rowType = rows[j].getAttribute('data-type');
-      if (filter === 'all') {
-        rows[j].style.display = '';
-      } else {
-        rows[j].style.display = rowType === filter ? '' : 'none';
-      }
+      rows[j].style.display = (filter === 'all' || rowType === filter) ? '' : 'none';
     }
   }
 
-  /* ===== NAVBAR SCROLL ===== */
   function handleScroll() {
     var navbar = document.querySelector('.navbar');
-    if (window.scrollY > 60) {
-      navbar.classList.add('scrolled');
-    } else {
-      navbar.classList.remove('scrolled');
-    }
+    navbar.classList.toggle('scrolled', window.scrollY > 60);
   }
 
   /* ===== INIT ===== */
@@ -756,39 +682,24 @@
       var topShows = results[5];
 
       loading.style.display = 'none';
-
       initHero(trendingMovies.slice(0, 8));
 
       var rowsFragment = document.createDocumentFragment();
-
-      var row1 = createCategoryRow('Trending Movies', trendingMovies, 'movie', false);
-      rowsFragment.appendChild(row1);
-
+      rowsFragment.appendChild(createCategoryRow('Trending Movies', trendingMovies, 'movie', false));
       rowsFragment.appendChild(createChannelsRow());
-
-      var row5 = createCategoryRow('Top 10 TV Shows', topShows, 'tv', true);
-      rowsFragment.appendChild(row5);
-
-      var row6 = createCategoryRow('Top 10 Movies', topMovies, 'movie', true);
-      rowsFragment.appendChild(row6);
-
-      var row3 = createCategoryRow('Popular Movies', popularMovies, 'movie', false);
-      rowsFragment.appendChild(row3);
-
-      var row4 = createCategoryRow('Popular Shows', popularShows, 'tv', false);
-      rowsFragment.appendChild(row4);
+      rowsFragment.appendChild(createCategoryRow('Top 10 TV Shows', topShows, 'tv', true));
+      rowsFragment.appendChild(createCategoryRow('Top 10 Movies', topMovies, 'movie', true));
+      rowsFragment.appendChild(createCategoryRow('Popular Movies', popularMovies, 'movie', false));
+      rowsFragment.appendChild(createCategoryRow('Popular Shows', popularShows, 'tv', false));
 
       content.appendChild(rowsFragment);
-
       setFilter(currentFilter);
     }).catch(function () {
-      loading.innerHTML = '<div class="search-empty">Failed to load content. Please refresh the page.</div>';
+      loading.innerHTML = '<div class="search-empty">Failed to load content. Please refresh.</div>';
     });
 
     seasonSelect.addEventListener('change', function () {
-      if (currentMedia && currentMedia.type === 'tv') {
-        updateEpisodes(currentMedia.item.id, this.value);
-      }
+      if (currentMedia && currentMedia.type === 'tv') updateEpisodes(currentMedia.item.id, this.value);
     });
 
     episodeSelect.addEventListener('change', function () {
@@ -799,22 +710,16 @@
     });
 
     playerClose.addEventListener('click', closePlayer);
-
     searchToggle.addEventListener('click', toggleSearch);
     searchInput.addEventListener('input', handleSearch);
-    searchClose.addEventListener('click', function () {
-      searchBar.classList.remove('active');
-      searchInput.value = '';
-      clearSearchResults();
-    });
-
-    searchInput.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape') {
+    
+    if (searchClose) {
+      searchClose.addEventListener('click', function () {
         searchBar.classList.remove('active');
         searchInput.value = '';
         clearSearchResults();
-      }
-    });
+      });
+    }
 
     for (var i = 0; i < navBtns.length; i++) {
       navBtns[i].addEventListener('click', function () {
@@ -823,9 +728,8 @@
     }
 
     detailClose.addEventListener('click', closeDetail);
-
     detailModal.addEventListener('click', function (e) {
-      if (e.target === detailModal || e.target.classList.contains('detail-overlay')) closeDetail();
+      if (e.target === detailModal) closeDetail();
     });
 
     document.addEventListener('keydown', function (e) {
