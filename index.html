@@ -1,107 +1,68 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Streaming Web App</title>
-  <link rel="stylesheet" href="style.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StreamApp</title>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-  <div id="loading" class="loading-screen">
-    <div class="spinner"></div>
-  </div>
-
-  <!-- Navigation Bar -->
-  <nav class="navbar">
-    <div class="nav-left">
-      <h1 class="logo">DuloStream</h1>
-      <div class="nav-links">
-        <button class="nav-btn active" data-filter="all">Home</button>
-        <button class="nav-btn" data-filter="movie">Movies</button>
-        <button class="nav-btn" data-filter="tv">TV Shows</button>
-      </div>
-    </div>
-    <div class="nav-right">
-      <button id="search-toggle" class="icon-btn" aria-label="Search">
-        <svg viewBox="0 0 24 24" width="24" height="24"><path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
-      </button>
-    </div>
-  </nav>
-
-  <!-- Search Bar Overlay -->
-  <div id="search-bar" class="search-bar">
-    <div class="search-container">
-      <input type="text" id="search-input" placeholder="Search movies, TV shows..." autocomplete="off">
-      <button id="search-close" class="btn btn-secondary">Cancel</button>
-    </div>
-  </div>
-
-  <!-- Hero Section -->
-  <header id="hero" class="hero">
-    <div id="hero-backdrop" class="hero-backdrop"></div>
-    <div class="hero-gradient"></div>
-    <div class="hero-content">
-      <span id="hero-badge" class="hero-badge"></span>
-      <h1 id="hero-title" class="hero-title"></h1>
-      <p id="hero-overview" class="hero-overview"></p>
-      <div class="hero-buttons">
-        <button id="btn-watch" class="btn btn-primary">
-          <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M8 5v14l11-7z"/></svg> Play
-        </button>
-        <button id="btn-info" class="btn btn-secondary">
-          <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg> More Info
-        </button>
-      </div>
-    </div>
-    <div id="hero-dots" class="hero-dots"></div>
-  </header>
-
-  <!-- Main Content Container -->
-  <main id="content" class="content-container"></main>
-
-  <!-- Player Modal -->
-  <div id="player-modal" class="player-modal">
-    <div class="player-header">
-      <span id="player-title" class="player-title"></span>
-      <div id="tv-controls" class="tv-controls" style="display:none;">
-        <select id="season-select" class="tv-select"></select>
-        <select id="episode-select" class="tv-select"></select>
-      </div>
-      <button id="player-close" class="player-close-btn">&times;</button>
-    </div>
-    <div class="player-body">
-      <iframe 
-        id="player-iframe" 
-        src="" 
-        sandbox="allow-scripts allow-same-origin allow-presentation"
-        allow="autoplay; encrypted-media; fullscreen; picture-in-picture" 
-        allowfullscreen>
-      </iframe>
-    </div>
-  </div>
-
-  <!-- Detail Modal -->
-  <div id="detail-modal" class="detail-modal">
-    <div class="detail-content">
-      <button id="detail-close" class="detail-close-btn">&times;</button>
-      <div id="detail-backdrop" class="detail-backdrop">
-        <div class="detail-gradient"></div>
-      </div>
-      <div class="detail-body">
-        <div id="detail-poster" class="detail-poster"></div>
-        <div class="detail-info">
-          <h2 id="detail-title" class="detail-title"></h2>
-          <div id="detail-meta" class="detail-meta"></div>
-          <p id="detail-overview" class="detail-overview"></p>
-          <button id="detail-watch" class="btn btn-primary">
-            <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M8 5v14l11-7z"/></svg> Play Now
-          </button>
+    <!-- Header / Navigation -->
+    <header>
+        <div class="logo">StreamApp</div>
+        <div class="search-container">
+            <input type="text" id="search-input" placeholder="Search movies or TV shows...">
+            <button id="search-btn">Search</button>
         </div>
-      </div>
-    </div>
-  </div>
+    </header>
 
-  <script src="app.js"></script>
+    <!-- Main Content Area -->
+    <main>
+        <section id="hero-section">
+            <!-- Dynamic Hero Banner / Featured Content -->
+        </section>
+
+        <section id="media-grid-section">
+            <h2>Trending Movies & Shows</h2>
+            <div id="media-grid" class="grid">
+                <!-- Media cards will be injected here via JavaScript -->
+            </div>
+        </section>
+    </main>
+
+    <!-- Video Player Modal with Click Shield -->
+    <div id="player-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <span id="close-modal" class="close-btn">&times;</span>
+            
+            <div class="server-selector">
+                <label for="server-select">Choose Server:</label>
+                <select id="server-select">
+                    <!-- Populated dynamically -->
+                </select>
+            </div>
+
+            <div class="player-body" style="position: relative; width: 100%; aspect-ratio: 16/9; background: #000;">
+                <!-- Transparent shield that blocks initial touch-jacking overlays on mobile -->
+                <div id="player-shield" style="position: absolute; inset: 0; z-index: 10; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; cursor: pointer;">
+                    <div style="background: rgba(0,0,0,0.8); color: white; padding: 12px 24px; border-radius: 8px; font-weight: bold; font-family: sans-serif; border: 1px solid rgba(255,255,255,0.2);">
+                        Tap to Enable Player
+                    </div>
+                </div>
+
+                <iframe 
+                    id="player-iframe" 
+                    src="" 
+                    style="width: 100%; height: 100%; border: none;"
+                    sandbox="allow-scripts allow-same-origin allow-presentation"
+                    allow="autoplay; encrypted-media; fullscreen; picture-in-picture" 
+                    allowfullscreen>
+                </iframe>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
 </body>
 </html>
