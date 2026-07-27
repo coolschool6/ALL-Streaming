@@ -6,42 +6,12 @@
   var IMG = 'https://image.tmdb.org/t/p/';
 
   var SERVERS = [
-    {
-      name: 'Server 1 (2Embed - Default)',
-      type: '2embed',
-      movie: 'https://www.2embed.cc/embed/',
-      tv: 'https://www.2embed.cc/embedtv/'
-    },
-    {
-      name: 'Server 2 (AutoEmbed)',
-      type: 'path',
-      movie: 'https://player.autoembed.cc/embed/movie/',
-      tv: 'https://player.autoembed.cc/embed/tv/'
-    },
-    {
-      name: 'Server 3 (VidSrc.xyz)',
-      type: 'query',
-      movie: 'https://vidsrc.xyz/embed/movie?tmdb=',
-      tv: 'https://vidsrc.xyz/embed/tv?tmdb='
-    },
-    {
-      name: 'Server 4 (VidSrc.me)',
-      type: 'query',
-      movie: 'https://vidsrc.me/embed/movie?tmdb=',
-      tv: 'https://vidsrc.me/embed/tv?tmdb='
-    },
-    {
-      name: 'Server 5 (SmashyStream)',
-      type: 'query',
-      movie: 'https://embed.smashystream.com/playere.php?tmdb=',
-      tv: 'https://embed.smashystream.com/playere.php?tmdb='
-    },
-    {
-      name: 'Server 6 (VidLink)',
-      type: 'path',
-      movie: 'https://vidlink.pro/movie/',
-      tv: 'https://vidlink.pro/tv/'
-    }
+    { name: 'Server 1 (2Embed - Default)', type: '2embed', movie: 'https://www.2embed.cc/embed/', tv: 'https://www.2embed.cc/embedtv/' },
+    { name: 'Server 2 (AutoEmbed)', type: 'path', movie: 'https://player.autoembed.cc/embed/movie/', tv: 'https://player.autoembed.cc/embed/tv/' },
+    { name: 'Server 3 (VidSrc.xyz)', type: 'query', movie: 'https://vidsrc.xyz/embed/movie?tmdb=', tv: 'https://vidsrc.xyz/embed/tv?tmdb=' },
+    { name: 'Server 4 (VidSrc.me)', type: 'query', movie: 'https://vidsrc.me/embed/movie?tmdb=', tv: 'https://vidsrc.me/embed/tv?tmdb=' },
+    { name: 'Server 5 (SmashyStream)', type: 'query', movie: 'https://embed.smashystream.com/playere.php?tmdb=', tv: 'https://embed.smashystream.com/playere.php?tmdb=' },
+    { name: 'Server 6 (VidLink)', type: 'path', movie: 'https://vidlink.pro/movie/', tv: 'https://vidlink.pro/tv/' }
   ];
 
   var content = document.getElementById('content');
@@ -131,6 +101,26 @@
     var d = document.createElement('div');
     d.textContent = str || '';
     return d.innerHTML;
+  }
+
+  /* ===== LOCAL STORAGE HISTORY (CONTINUE WATCHING) ===== */
+  function saveWatchHistory(item, mediaType) {
+    try {
+      var history = JSON.parse(localStorage.getItem('dulo_history') || '[]');
+      history = history.filter(function (i) { return i.id !== item.id; });
+      item.media_type = mediaType;
+      history.unshift(item);
+      if (history.length > 15) history.pop();
+      localStorage.setItem('dulo_history', JSON.stringify(history));
+    } catch (e) {}
+  }
+
+  function getWatchHistory() {
+    try {
+      return JSON.parse(localStorage.getItem('dulo_history') || '[]');
+    } catch (e) {
+      return [];
+    }
   }
 
   /* ===== HERO ===== */
@@ -323,6 +313,7 @@
 
   /* ===== ROWS & CARDS ===== */
   function createCategoryRow(title, items, type, useTopStyle) {
+    if (!items || items.length === 0) return null;
     var section = document.createElement('div');
     section.className = 'category-row';
     section.setAttribute('data-type', type || 'all');
@@ -480,6 +471,7 @@
   }
 
   function openPlayer(item, mediaType) {
+    saveWatchHistory(item, mediaType);
     initServerSelector();
     currentMedia = { item: item, type: mediaType };
     playerTitle.textContent = item.title || item.name || '';
@@ -680,11 +672,17 @@
       var popularShows = results[3];
       var topMovies = results[4];
       var topShows = results[5];
+      var historyItems = getWatchHistory();
 
       loading.style.display = 'none';
       initHero(trendingMovies.slice(0, 8));
 
       var rowsFragment = document.createDocumentFragment();
+
+      if (historyItems.length > 0) {
+        rowsFragment.appendChild(createCategoryRow('Continue Watching', historyItems, 'all', false));
+      }
+
       rowsFragment.appendChild(createCategoryRow('Trending Movies', trendingMovies, 'movie', false));
       rowsFragment.appendChild(createChannelsRow());
       rowsFragment.appendChild(createCategoryRow('Top 10 TV Shows', topShows, 'tv', true));
