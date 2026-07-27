@@ -38,7 +38,7 @@ async function persistState(state) {
     var existing = await fetch(url, { headers: { 'Authorization': 'Bearer ' + GITHUB_TOKEN, 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'ALLStreaming' } });
     var sha = null;
     if (existing.ok) { var d = await existing.json(); sha = d.sha; }
-    var res = await fetch(url, {
+    await fetch(url, {
       method: 'PUT',
       headers: { 'Authorization': 'Bearer ' + GITHUB_TOKEN, 'Accept': 'application/vnd.github.v3+json', 'Content-Type': 'application/json', 'User-Agent': 'ALLStreaming' },
       body: JSON.stringify({ message: 'Update key activation state', content: Buffer.from(JSON.stringify(state, null, 2) + '\n').toString('base64'), sha: sha, branch: 'main' })
@@ -57,13 +57,19 @@ function findKey(inputKey) {
   return null;
 }
 
-function calcRemaining(activatedAt, validDays) {
-  var expiry = new Date(activatedAt);
-  expiry.setDate(expiry.getDate() + validDays);
-  var today = new Date();
-  today.setHours(0, 0, 0, 0);
-  expiry.setHours(0, 0, 0, 0);
-  return Math.ceil((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+function getKeyDurationMs(keyObj) {
+  var days = Number(keyObj.validDays) || 0;
+  var mins = Number(keyObj.validMinutes) || 0;
+  return days * 86400000 + mins * 60000;
+}
+
+function getKeyDurationLabel(keyObj) {
+  var days = Number(keyObj.validDays) || 0;
+  var mins = Number(keyObj.validMinutes) || 0;
+  if (days > 0 && mins > 0) return days + 'd ' + mins + 'm';
+  if (days > 0) return days + ' day' + (days !== 1 ? 's' : '');
+  if (mins > 0) return mins + ' minute' + (mins !== 1 ? 's' : '');
+  return 'unknown';
 }
 
 module.exports = async function (req, res) {
@@ -83,8 +89,8 @@ module.exports = async function (req, res) {
 
     if (!keyObj) return res.status(401).json({ valid: false, error: 'Invalid key' });
 
-    var validDays = Number(keyObj.validDays);
-    if (!Number.isFinite(validDays) || validDays <= 0) {
+    var durationMs = getKeyDurationMs(keyObj);
+    if (durationMs <= 0) {
       return res.status(500).json({ valid: false, error: 'Invalid key configuration' });
     }
 
@@ -99,18 +105,21 @@ module.exports = async function (req, res) {
       persistState(state);
     }
 
-    var expiryMs = new Date(activatedAt).getTime() + validDays * 86400000;
-    var remaining = calcRemaining(activatedAt, validDays);
-    if (remaining <= 0) return res.status(401).json({ valid: false, error: 'expired' });
+    var expiryMs = new Date(activatedAt).getTime() + durationMs;
+    var remainingMs = expiryMs - Date.now();
+    if (remainingMs <= 0) return res.status(401).json({ valid: false, error: 'expired' });
 
-    var payload = JSON.stringify({ k: keyObj.key, a: activatedAt, d: validDays, e: expiryMs });
+    var remainingText = getKeyDurationLabel(keyObj);
+
+    var payload = JSON.stringify({ k: keyObj.key, a: activatedAt, e: expiryMs });
     var signature = sign(payload);
     var token = Buffer.from(payload).toString('base64url') + '.' + signature;
 
     return res.status(200).json({
       valid: true,
       token: token,
-      remaining: remaining,
+      remainingMs: remainingMs,
+      remainingText: remainingText,
       activatedAt: activatedAt,
       expiresAt: new Date(expiryMs).toISOString()
     });
@@ -132,8 +141,8 @@ module.exports = async function (req, res) {
       var now = Date.now();
       if (data.e < now) return res.status(401).json({ valid: false, error: 'expired' });
 
-      var rem = Math.ceil((data.e - now) / (1000 * 60 * 60 * 24));
-      return res.status(200).json({ valid: true, remaining: rem });
+      var rem = data.e - now;
+      return res.status(200).json({ valid: true, remainingMs: rem });
     } catch (e) {
       return res.status(401).json({ valid: false, error: 'Invalid token' });
     }

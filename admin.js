@@ -108,13 +108,16 @@
         statusClass = 'status-disabled';
         disabledCount++;
       } else if (k.activatedAt) {
-        var remaining = Math.ceil((k.expiresAt - Date.now()) / 86400000);
-        if (remaining <= 0) {
+        var remainingMs = k.remainingMs || 0;
+        if (remainingMs <= 0) {
           statusText = 'Expired';
           statusClass = 'status-expired';
           expiredCount++;
         } else {
-          statusText = 'Active (' + remaining + 'd left)';
+          var remDays = Math.floor(remainingMs / 86400000);
+          var remHrs = Math.floor((remainingMs % 86400000) / 3600000);
+          var remMin = Math.floor((remainingMs % 3600000) / 60000);
+          statusText = 'Active (' + remDays + 'd ' + remHrs + 'h ' + remMin + 'm)';
           statusClass = 'status-active';
           activeCount++;
         }
@@ -124,12 +127,13 @@
       }
 
       var note = k.userNote || '-';
-      var activatedStr = k.activatedAt ? new Date(k.activatedAt).toLocaleDateString() : '-';
-      var expiresStr = k.expiresAt ? new Date(k.expiresAt).toLocaleDateString() : '-';
+      var activatedStr = k.activatedAt ? new Date(k.activatedAt).toLocaleString() : '-';
+      var expiresStr = k.expiresAt ? new Date(k.expiresAt).toLocaleString() : '-';
+      var durLabel = k.durationLabel || (k.validDays + 'd');
 
       tr.innerHTML =
         '<td class="key-name">' + escHtml(k.key) + '</td>' +
-        '<td>' + k.validDays + 'd</td>' +
+        '<td>' + durLabel + '</td>' +
         '<td class="key-note">' + escHtml(note) + '</td>' +
         '<td>' + activatedStr + '</td>' +
         '<td>' + expiresStr + '</td>' +

@@ -196,6 +196,12 @@
     }
   }
 
+  function getKeyDurationMs(keyObj) {
+    var days = Number(keyObj.validDays) || 0;
+    var mins = Number(keyObj.validMinutes) || 0;
+    return days * 86400000 + mins * 60000;
+  }
+
   async function validateLocally(inputKey) {
     try {
       var res = await fetch('keys.json', { cache: 'no-store' });
@@ -217,25 +223,25 @@
       return { valid: false, error: 'Invalid key' };
     }
 
-    var validDays = Number(keyObj.validDays);
-    if (!Number.isFinite(validDays) || validDays <= 0) {
+    var durationMs = getKeyDurationMs(keyObj);
+    if (durationMs <= 0) {
       return { valid: false, error: 'Invalid key configuration' };
     }
 
     var activatedAt = new Date().toISOString();
-    var expiryMs = new Date(activatedAt).getTime() + validDays * 86400000;
-    var remaining = Math.ceil((expiryMs - Date.now()) / 86400000);
-    if (remaining <= 0) {
+    var expiryMs = new Date(activatedAt).getTime() + durationMs;
+    var remainingMs = expiryMs - Date.now();
+    if (remainingMs <= 0) {
       return { valid: false, error: 'expired' };
     }
 
-    var payload = JSON.stringify({ k: keyObj.key, a: activatedAt, d: validDays, e: expiryMs });
+    var payload = JSON.stringify({ k: keyObj.key, a: activatedAt, e: expiryMs });
     var token = btoa(payload) + '.local';
 
     return {
       valid: true,
       token: token,
-      remaining: remaining,
+      remainingMs: remainingMs,
       activatedAt: activatedAt,
       expiresAt: new Date(expiryMs).toISOString()
     };

@@ -85,6 +85,21 @@ function findKey(keys, name) {
   return null;
 }
 
+function getKeyDurationMs(keyObj) {
+  var days = Number(keyObj.validDays) || 0;
+  var mins = Number(keyObj.validMinutes) || 0;
+  return days * 86400000 + mins * 60000;
+}
+
+function getKeyDurationLabel(keyObj) {
+  var days = Number(keyObj.validDays) || 0;
+  var mins = Number(keyObj.validMinutes) || 0;
+  if (days > 0 && mins > 0) return days + 'd ' + mins + 'm';
+  if (days > 0) return days + 'd';
+  if (mins > 0) return mins + 'm';
+  return '?';
+}
+
 function createAdminToken() {
   var payload = JSON.stringify({ admin: true, iat: Date.now() });
   var signature = sign(payload);
@@ -149,13 +164,21 @@ module.exports = async function (req, res) {
     try { state = JSON.parse(fs.readFileSync(statePath, 'utf8')); } catch (e) {}
 
     var enriched = keys.map(function (k) {
-      var result = { key: k.key, validDays: k.validDays, userNote: k.userNote || '', disabled: !!k.disabled };
+      var durationMs = getKeyDurationMs(k);
+      var result = {
+        key: k.key,
+        validDays: k.validDays || 0,
+        validMinutes: k.validMinutes || 0,
+        durationLabel: getKeyDurationLabel(k),
+        userNote: k.userNote || '',
+        disabled: !!k.disabled
+      };
       var s = state[k.key];
       if (s && s.activatedAt) {
         result.activatedAt = s.activatedAt;
-        var expiryMs = new Date(s.activatedAt).getTime() + Number(k.validDays) * 86400000;
+        var expiryMs = new Date(s.activatedAt).getTime() + durationMs;
         result.expiresAt = expiryMs;
-        result.remaining = Math.ceil((expiryMs - Date.now()) / 86400000);
+        result.remainingMs = expiryMs - Date.now();
       }
       return result;
     });
@@ -171,8 +194,8 @@ module.exports = async function (req, res) {
     if (!keyObj) return res.status(200).json({ valid: false, error: 'Key not found in keys.json' });
     if (keyObj.disabled) return res.status(200).json({ valid: false, error: 'Key is disabled' });
 
-    var validDays = Number(keyObj.validDays);
-    if (!Number.isFinite(validDays) || validDays <= 0) {
+    var durationMs = getKeyDurationMs(keyObj);
+    if (durationMs <= 0) {
       return res.status(200).json({ valid: false, error: 'Invalid key configuration' });
     }
 
@@ -182,28 +205,28 @@ module.exports = async function (req, res) {
 
     var keyState = state[keyObj.key];
     if (keyState && keyState.activatedAt) {
-      var remaining = calcRemaining(keyState.activatedAt, validDays);
-      var expiryMs = new Date(keyState.activatedAt).getTime() + validDays * 86400000;
-      if (remaining <= 0) {
+      var expiryMs = new Date(keyState.activatedAt).getTime() + durationMs;
+      var remainingMs = expiryMs - Date.now();
+      if (remainingMs <= 0) {
         return res.status(200).json({ valid: false, error: 'expired', activatedAt: keyState.activatedAt, expiresAt: expiryMs });
       }
       return res.status(200).json({
         valid: true,
         activatedAt: keyState.activatedAt,
         expiresAt: expiryMs,
-        remaining: remaining,
-        validDays: validDays
+        remainingMs: remainingMs,
+        durationLabel: getKeyDurationLabel(keyObj)
       });
     }
 
     var now = new Date().toISOString();
-    var expiryMs = new Date(now).getTime() + validDays * 86400000;
+    var expiryMs = new Date(now).getTime() + durationMs;
     return res.status(200).json({
       valid: true,
       activatedAt: null,
       expiresAt: expiryMs,
-      remaining: validDays,
-      validDays: validDays,
+      remainingMs: durationMs,
+      durationLabel: getKeyDurationLabel(keyObj),
       note: 'Not yet activated by any user'
     });
   }

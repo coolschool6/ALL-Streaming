@@ -13,5 +13,60 @@
     "key": "KEY-USER1-30",
     "validDays": 30,
     "userNote": "User 1 - Standard Access"
+  },
+  {
+    "key": "DAY-KEY-01",
+    "validDays": 1,
+    "userNote": "24hr Key #1"
+  },
+  {
+    "key": "DAY-KEY-02",
+    "validDays": 1,
+    "userNote": "24hr Key #2"
+  },
+  {
+    "key": "DAY-KEY-03",
+    "validDays": 1,
+    "userNote": "24hr Key #3"
+  },
+  {
+    "key": "DAY-KEY-04",
+    "validDays": 1,
+    "userNote": "24hr Key #4"
+  },
+  {
+    "key": "DAY-KEY-05",
+    "validDays": 1,
+    "userNote": "24hr Key #5"
+  },
+  {
+    "key": "DAY-KEY-06",
+    "validDays": 1,
+    "userNote": "24hr Key #6"
+  },
+  {
+    "key": "DAY-KEY-07",
+    "validDays": 1,
+    "userNote": "24hr Key #7"
+  },
+  {
+    "key": "DAY-KEY-08",
+    "validDays": 1,
+    "userNote": "24hr Key #8"
+  },
+  {
+    "key": "DAY-KEY-09",
+    "validDays": 1,
+    "userNote": "24hr Key #9"
+  },
+  {
+    "key": "DAY-KEY-10",
+    "validDays": 1,
+    "userNote": "24hr Key #10"
+  },
+  {
+    "key": "QUICK-TEST-5M",
+    "validMinutes": 5,
+    "userNote": "5 Minute Test Key"
   }
 ]
