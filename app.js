@@ -6,11 +6,6 @@
   var BASE = 'https://api.themoviedb.org/3';
   var IMG = 'https://image.tmdb.org/t/p/';
 
-  // POP-UP CONTROL:
-  // Set to `true` to block 99% of pop-ups/redirects.
-  // Set to `false` if an embed server gives a black screen due to anti-adblock detection.
-  var BLOCK_POPUPS_STRICT = true;
-
   // Active multi-server provider list
   var SERVERS = [
     {
@@ -89,7 +84,7 @@
   var searchTimeout = null;
   var currentMedia = null;
 
-  /* ===== POPUP SUPPRESSION HANDLER ===== */
+  /* ===== LIGHTWEIGHT POP-UP SUPPRESSION ===== */
   window.open = function () {
     return {
       focus: function () {},
@@ -459,12 +454,8 @@
     currentMedia = { item: item, type: mediaType };
     playerTitle.textContent = item.title || item.name || '';
 
-    // Apply strict sandboxing to block iframe pop-ups if enabled
-    if (BLOCK_POPUPS_STRICT) {
-      playerIframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-presentation');
-    } else {
-      playerIframe.removeAttribute('sandbox');
-    }
+    // Explicitly remove sandbox attribute so embed players don't reject playback
+    playerIframe.removeAttribute('sandbox');
 
     playerIframe.setAttribute('allow', 'autoplay; encrypted-media; fullscreen; picture-in-picture');
     playerIframe.setAttribute('allowfullscreen', 'true');
@@ -497,7 +488,6 @@
 
     function testNextServer(index) {
       if (index >= SERVERS.length) {
-        // Fallback to Server 1 if all tests fail
         serverSelect.value = '0';
         playerIframe.src = buildEmbedURL(SERVERS[0], type, item.id, sNum, eNum);
         return;
@@ -506,7 +496,6 @@
       var server = SERVERS[index];
       var targetURL = buildEmbedURL(server, type, item.id, sNum, eNum);
 
-      // Fast background ping test to check domain reachability/DNS
       var controller = new AbortController();
       var timeoutId = setTimeout(function () { controller.abort(); }, 2000);
 
