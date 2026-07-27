@@ -4,7 +4,7 @@
   var API_KEY = 'cd27a14dfc1752e04b474124a5af6d2b';
   var BASE = 'https://api.themoviedb.org/3';
   var IMG = 'https://image.tmdb.org/t/p/';
-  var VIDCORE = 'https://vidcore.org/embed/';
+  var VIDCORE = 'https://www.vidcore.org/embed/';
 
   var content = document.getElementById('content');
   var loading = document.getElementById('loading');
@@ -41,6 +41,7 @@
   var heroInterval = null;
   var currentFilter = 'all';
   var searchTimeout = null;
+  var currentMedia = null;
 
   /* ===== AD BLOCKING ===== */
   var _origOpen = window.open.bind(window);
@@ -57,16 +58,6 @@
       e.preventDefault();
     }
   }, true);
-  document.addEventListener('mousedown', function (e) {
-    if (e.target.closest('.player-modal') && !e.target.closest('iframe')) {
-      e.stopPropagation();
-    }
-  }, true);
-  window.addEventListener('message', function (e) {
-    if (e.data && (e.data === 'open' || (typeof e.data === 'string' && e.data.indexOf('popup') !== -1))) {
-      e.stopImmediatePropagation();
-    }
-  }, true);
 
   function fetchTMDB(endpoint) {
     var sep = endpoint.indexOf('?') === -1 ? '?' : '&';
@@ -76,7 +67,7 @@
         return res.json();
       })
       .then(function (data) {
-        return data.results || [];
+        return data.results !== undefined ? data.results : data;
       });
   }
 
@@ -378,15 +369,93 @@
     document.body.style.overflow = '';
   }
 
-  /* ===== PLAYER ===== */
+  /* ===== PLAYER ENGINE ===== */
   function openPlayer(item, mediaType) {
-    var url;
+    currentMedia = { item: item, type: mediaType };
+    playerTitle.textContent = item.title || item.name || '';
+
     if (mediaType === 'tv') {
-      url = VIDCORE + 'tv/' + item.id + '/1/1';
+      tvControls.style.display = 'flex';
+      setupTVControls(item.id);
     } else {
-      url = VIDCORE + 'movie/' + item.id + '?autoPlay=true';
+      tvControls.style.display = 'none';
+      playerIframe.src = VIDCORE + 'movie/' + item.id;
     }
-    _origOpen(url, '_blank');
+
+    playerModal.classList.add('active');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closePlayer() {
+    playerIframe.src = 'about:blank';
+    playerModal.classList.remove('active');
+    document.body.style.overflow = '';
+  }
+
+  function setupTVControls(tvId) {
+    seasonSelect.innerHTML = '<option value="">Loading seasons...</option>';
+    episodeSelect.innerHTML = '<option value="">Select episode</option>';
+
+    fetchTMDB('/tv/' + tvId)
+      .then(function (tvData) {
+        seasonSelect.innerHTML = '';
+        var seasons = (tvData.seasons || []).filter(function(s) { return s.season_number > 0; });
+        
+        if (!seasons.length) {
+          seasonSelect.innerHTML = '<option value="1">Season 1</option>';
+          updateEpisodes(tvId, 1);
+          return;
+        }
+
+        seasons.forEach(function (s) {
+          var opt = document.createElement('option');
+          opt.value = s.season_number;
+          opt.textContent = s.name || ('Season ' + s.season_number);
+          seasonSelect.appendChild(opt);
+        });
+
+        var firstSeason = seasons[0].season_number;
+        seasonSelect.value = firstSeason;
+        updateEpisodes(tvId, firstSeason);
+      })
+      .catch(function () {
+        seasonSelect.innerHTML = '<option value="1">Season 1</option>';
+        updateEpisodes(tvId, 1);
+      });
+  }
+
+  function updateEpisodes(tvId, seasonNum) {
+    episodeSelect.innerHTML = '<option value="">Loading episodes...</option>';
+
+    fetchTMDB('/tv/' + tvId + '/season/' + seasonNum)
+      .then(function (seasonData) {
+        episodeSelect.innerHTML = '';
+        var episodes = seasonData.episodes || [];
+
+        if (!episodes.length) {
+          episodeSelect.innerHTML = '<option value="1">Episode 1</option>';
+          loadTVEpisode(tvId, seasonNum, 1);
+          return;
+        }
+
+        episodes.forEach(function (ep) {
+          var opt = document.createElement('option');
+          opt.value = ep.episode_number;
+          opt.textContent = 'E' + ep.episode_number + ' - ' + (ep.name || ('Episode ' + ep.episode_number));
+          episodeSelect.appendChild(opt);
+        });
+
+        episodeSelect.value = 1;
+        loadTVEpisode(tvId, seasonNum, 1);
+      })
+      .catch(function () {
+        episodeSelect.innerHTML = '<option value="1">Episode 1</option>';
+        loadTVEpisode(tvId, seasonNum, 1);
+      });
+  }
+
+  function loadTVEpisode(tvId, seasonNum, epNum) {
+    playerIframe.src = VIDCORE + 'tv/' + tvId + '/' + seasonNum + '/' + epNum;
   }
 
   /* ===== SEARCH ===== */
@@ -542,6 +611,20 @@
       loading.innerHTML = '<div class="search-empty">Failed to load content. Please refresh the page.</div>';
     });
 
+    seasonSelect.addEventListener('change', function () {
+      if (currentMedia && currentMedia.type === 'tv') {
+        updateEpisodes(currentMedia.item.id, this.value);
+      }
+    });
+
+    episodeSelect.addEventListener('change', function () {
+      if (currentMedia && currentMedia.type === 'tv') {
+        loadTVEpisode(currentMedia.item.id, seasonSelect.value, this.value);
+      }
+    });
+
+    playerClose.addEventListener('click', closePlayer);
+
     searchToggle.addEventListener('click', toggleSearch);
     searchInput.addEventListener('input', handleSearch);
     searchClose.addEventListener('click', function () {
@@ -572,7 +655,8 @@
 
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape') {
-        if (detailModal.classList.contains('active')) closeDetail();
+        if (playerModal.classList.contains('active')) closePlayer();
+        else if (detailModal.classList.contains('active')) closeDetail();
         else if (searchBar.classList.contains('active')) {
           searchBar.classList.remove('active');
           searchInput.value = '';
