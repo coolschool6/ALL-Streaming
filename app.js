@@ -218,16 +218,16 @@
 
   /* ===== CHANNELS & APPS ===== */
   var CHANNELS = [
-    { name: 'Netflix', logo: 'logos/netflix.png', url: 'https://www.netflix.com' },
-    { name: 'Prime Video', logo: 'logos/primevideo.png', url: 'https://www.primevideo.com' },
-    { name: 'Disney+', logo: 'logos/disney.png', url: 'https://www.disneyplus.com' },
-    { name: 'Hulu', logo: 'logos/hulu.png', url: 'https://www.hulu.com' },
-    { name: 'Max', logo: 'logos/hbomax.png', url: 'https://www.max.com' },
-    { name: 'Apple TV+', logo: 'logos/appletv.png', url: 'https://tv.apple.com' },
-    { name: 'Paramount+', logo: 'logos/paramount.png', url: 'https://www.paramountplus.com' },
-    { name: 'Peacock', logo: 'logos/peacock.png', url: 'https://www.peacocktv.com' },
-    { name: 'Crunchyroll', logo: 'logos/crunchyroll.png', url: 'https://www.crunchyroll.com' },
-    { name: 'AMC+', logo: 'logos/amc.png', url: 'https://www.amcplus.com' }
+    { name: 'Netflix', logo: 'logos/netflix.png', provider_id: 8 },
+    { name: 'Prime Video', logo: 'logos/primevideo.png', provider_id: 9 },
+    { name: 'Disney+', logo: 'logos/disney.png', provider_id: 337 },
+    { name: 'Hulu', logo: 'logos/hulu.png', provider_id: 15 },
+    { name: 'Max', logo: 'logos/hbomax.png', provider_id: 1899 },
+    { name: 'Apple TV+', logo: 'logos/appletv.png', provider_id: 350 },
+    { name: 'Paramount+', logo: 'logos/paramount.png', provider_id: 531 },
+    { name: 'Peacock', logo: 'logos/peacock.png', provider_id: 386 },
+    { name: 'Crunchyroll', logo: 'logos/crunchyroll.png', provider_id: 283 },
+    { name: 'AMC+', logo: 'logos/amc.png', provider_id: 528 }
   ];
 
   function createChannelsRow() {
@@ -248,28 +248,101 @@
     track.className = 'cards-track channels-track';
 
     for (var i = 0; i < CHANNELS.length; i++) {
-      var ch = CHANNELS[i];
-      var card = document.createElement('a');
-      card.className = 'channel-card';
-      card.href = ch.url;
-      card.target = '_blank';
-      card.rel = 'noopener noreferrer';
+      (function(ch) {
+        var card = document.createElement('div');
+        card.className = 'channel-card';
+        card.style.cursor = 'pointer';
 
-      var logoWrap = document.createElement('div');
-      logoWrap.className = 'channel-logo';
+        var logoWrap = document.createElement('div');
+        logoWrap.className = 'channel-logo';
 
-      var img = document.createElement('img');
-      img.src = ch.logo;
-      img.alt = ch.name;
-      img.loading = 'lazy';
-      logoWrap.appendChild(img);
+        var img = document.createElement('img');
+        img.src = ch.logo;
+        img.alt = ch.name;
+        img.loading = 'lazy';
+        logoWrap.appendChild(img);
 
-      card.appendChild(logoWrap);
-      track.appendChild(card);
+        card.appendChild(logoWrap);
+
+        // Click to load channel media natively inside page
+        card.addEventListener('click', function (e) {
+          e.preventDefault();
+          loadProviderContent(ch);
+        });
+
+        track.appendChild(card);
+      })(CHANNELS[i]);
     }
 
     section.appendChild(track);
     return section;
+  }
+
+  /* ===== NATIVE PROVIDER / CHANNEL CONTENT LOADER ===== */
+  function loadProviderContent(channel) {
+    clearSearchResults();
+    showAllRows(false);
+
+    var section = document.createElement('div');
+    section.className = 'search-row';
+    section.id = 'search-results';
+
+    var headerBox = document.createElement('div');
+    headerBox.style.cssText = 'display:flex; align-items:center; justify-content:space-between; margin-bottom: 20px;';
+
+    var h2 = document.createElement('h2');
+    h2.className = 'row-title';
+    h2.style.margin = '0';
+    h2.textContent = channel.name + ' Titles';
+
+    var backBtn = document.createElement('button');
+    backBtn.textContent = '← Back to Home';
+    backBtn.style.cssText = 'background:#e50914; color:#fff; border:0; padding:8px 16px; border-radius:4px; font-weight:600; cursor:pointer;';
+    backBtn.onclick = function () {
+      clearSearchResults();
+    };
+
+    headerBox.appendChild(h2);
+    headerBox.appendChild(backBtn);
+    section.appendChild(headerBox);
+
+    var grid = document.createElement('div');
+    grid.className = 'search-results-grid';
+    section.appendChild(grid);
+    content.appendChild(section);
+
+    // Fetch movies & shows from TMDB for this provider
+    var region = 'US';
+    var pMovies = fetchTMDB('/discover/movie?watch_region=' + region + '&with_watch_providers=' + channel.provider_id + '&sort_by=popularity.desc');
+    var pTV = fetchTMDB('/discover/tv?watch_region=' + region + '&with_watch_providers=' + channel.provider_id + '&sort_by=popularity.desc');
+
+    Promise.all([pMovies, pTV])
+      .then(function (results) {
+        var movies = (results[0] || []).map(function(m) { m.media_type = 'movie'; return m; });
+        var tvs = (results[1] || []).map(function(t) { t.media_type = 'tv'; return t; });
+        
+        // Merge & alternate movies and tv shows
+        var combined = [];
+        var maxLen = Math.max(movies.length, tvs.length);
+        for (var i = 0; i < maxLen; i++) {
+          if (movies[i]) combined.push(movies[i]);
+          if (tvs[i]) combined.push(tvs[i]);
+        }
+
+        if (combined.length === 0) {
+          grid.innerHTML = '<div class="search-empty">No titles found for this provider.</div>';
+          return;
+        }
+
+        combined.forEach(function (item) {
+          grid.appendChild(createCard(item, item.media_type));
+        });
+      })
+      .catch(function () {
+        grid.innerHTML = '<div class="search-empty">Failed to load channel content. Please try again.</div>';
+      });
+
+    window.scrollTo({ top: 300, behavior: 'smooth' });
   }
 
   /* ===== ROWS ===== */
@@ -476,7 +549,7 @@
     document.body.style.overflow = 'hidden';
   }
 
-  /* MANUAL SERVER LOADER (NO AUTOMATIC SWITCHING) */
+  /* MANUAL SERVER LOADER */
   function loadServer(serverIndex) {
     if (!currentMedia) return;
 
