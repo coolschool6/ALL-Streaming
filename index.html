@@ -109,6 +109,38 @@
     </div>
   </div>
 
+  <!-- FULL-PAGE SHOW VIEW (Dulo-style) -->
+  <div class="show-page" id="show-page">
+    <div class="show-backdrop" id="show-backdrop"></div>
+    <div class="show-backdrop-gradient"></div>
+    <div class="show-top-bar">
+      <button class="show-back-btn" id="show-back-btn" aria-label="Back">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        <span>Back</span>
+      </button>
+    </div>
+    <div class="show-header">
+      <h1 class="show-title" id="show-title"></h1>
+      <div class="show-meta" id="show-meta"></div>
+    </div>
+    <div class="show-toolbar">
+      <div class="season-selector" id="season-selector">
+        <button class="season-btn" id="season-btn">Season 1 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>
+        <div class="season-dropdown" id="season-dropdown"></div>
+      </div>
+    </div>
+    <div class="show-episodes" id="show-episodes">
+      <div class="episodes-loading" id="episodes-loading">
+        <div class="spinner"></div>
+      </div>
+    </div>
+    <div class="show-synopsis" id="show-synopsis"></div>
+    <div class="show-similar">
+      <h3 class="show-similar-title">More Like This</h3>
+      <div class="show-similar-track" id="show-similar-track"></div>
+    </div>
+  </div>
+
   <!-- MANUAL PAYWALL MODAL -->
   <div id="paywall-overlay" class="paywall-modal" style="display: none;">
     <div class="paywall-content">

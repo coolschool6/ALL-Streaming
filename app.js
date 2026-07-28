@@ -401,6 +401,14 @@
     img.src = src ? imgURL(src) : '';
     img.alt = item.title || item.name || '';
     poster.appendChild(img);
+
+    if (item.vote_average && item.vote_average > 0) {
+      var ratingBadge = document.createElement('div');
+      ratingBadge.className = 'card-rating';
+      ratingBadge.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>' + item.vote_average.toFixed(1);
+      poster.appendChild(ratingBadge);
+    }
+
     card.appendChild(poster);
 
     var info = document.createElement('div');
@@ -409,6 +417,14 @@
     name.className = 'card-name';
     name.textContent = item.title || item.name || '';
     info.appendChild(name);
+
+    var yearText = (item.release_date || item.first_air_date || '').substring(0, 4);
+    if (yearText) {
+      var year = document.createElement('div');
+      year.className = 'card-year';
+      year.textContent = yearText;
+      info.appendChild(year);
+    }
     card.appendChild(info);
 
     card.addEventListener('click', function () { openDetail(item, mediaType); });
@@ -435,6 +451,10 @@
   }
 
   function openDetail(item, mediaType) {
+    if (mediaType === 'tv') {
+      openShowPage(item);
+      return;
+    }
     var bg = item.backdrop_path || item.poster_path;
     detailBackdrop.style.backgroundImage = bg ? 'url(' + imgURL(bg, 'original') + ')' : 'none';
     detailPoster.innerHTML = item.poster_path ? '<img src="' + imgURL(item.poster_path) + '" alt="">' : '';
@@ -443,6 +463,206 @@
     detailWatch.onclick = function () { closeDetail(); openPlayer(item, mediaType); };
     detailModal.classList.add('active');
     document.body.style.overflow = 'hidden';
+  }
+
+  /* ===== FULL-PAGE SHOW VIEW ===== */
+  var showPage = document.getElementById('show-page');
+  var showBackdrop = document.getElementById('show-backdrop');
+  var showTitle = document.getElementById('show-title');
+  var showMeta = document.getElementById('show-meta');
+  var seasonBtn = document.getElementById('season-btn');
+  var seasonDropdown = document.getElementById('season-dropdown');
+  var showEpisodes = document.getElementById('show-episodes');
+  var episodesLoading = document.getElementById('episodes-loading');
+  var showSynopsis = document.getElementById('show-synopsis');
+  var showSimilarTrack = document.getElementById('show-similar-track');
+  var showBackBtn = document.getElementById('show-back-btn');
+  var currentShowData = null;
+  var currentSeasonNum = 1;
+
+  function openShowPage(item) {
+    showPage.classList.add('active');
+    document.body.style.overflow = 'hidden';
+    showEpisodes.innerHTML = '';
+    showEpisodes.appendChild(episodesLoading);
+    showSimilarTrack.innerHTML = '';
+    showSynopsis.innerHTML = '';
+    showTitle.textContent = item.name || item.title || '';
+    seasonBtn.innerHTML = 'Season 1 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
+    seasonDropdown.innerHTML = '';
+    seasonDropdown.classList.remove('open');
+    currentSeasonNum = 1;
+
+    var bg = item.backdrop_path || item.poster_path;
+    showBackdrop.style.backgroundImage = bg ? 'url(' + imgURL(bg, 'original') + ')' : 'none';
+
+    fetchTMDB('/tv/' + item.id).then(function (tvData) {
+      currentShowData = tvData;
+      var year = (tvData.first_air_date || '').substring(0, 4);
+      var rating = tvData.vote_average ? tvData.vote_average.toFixed(1) : '';
+      var seasons = (tvData.seasons || []).filter(function(s) { return s.season_number > 0; });
+      var seasonCount = tvData.number_of_seasons || seasons.length;
+
+      var metaHTML = '';
+      if (year) metaHTML += '<span class="meta-item">' + year + '</span>';
+      if (rating) metaHTML += '<span class="meta-dot"></span><span class="meta-item meta-rating meta-imdb">IMDb ' + rating + '</span>';
+      if (seasonCount) metaHTML += '<span class="meta-dot"></span><span class="meta-item">' + seasonCount + ' Season' + (seasonCount !== 1 ? 's' : '') + '</span>';
+      showMeta.innerHTML = metaHTML;
+
+      seasonDropdown.innerHTML = '';
+      seasons.forEach(function (s) {
+        var btn = document.createElement('button');
+        btn.className = 'season-option' + (s.season_number === 1 ? ' active' : '');
+        btn.textContent = s.name || ('Season ' + s.season_number);
+        btn.setAttribute('data-season', s.season_number);
+        btn.addEventListener('click', function () {
+          var sn = parseInt(this.getAttribute('data-season'));
+          currentSeasonNum = sn;
+          seasonBtn.innerHTML = (this.textContent) + ' <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
+          seasonDropdown.querySelectorAll('.season-option').forEach(function(o) { o.classList.remove('active'); });
+          btn.classList.add('active');
+          seasonDropdown.classList.remove('open');
+          renderSeasonEpisodes(item.id, sn);
+        });
+        seasonDropdown.appendChild(btn);
+      });
+
+      renderSeasonEpisodes(item.id, 1);
+      renderSimilarShows(item.id);
+    });
+  }
+
+  function closeShowPage() {
+    showPage.classList.remove('active');
+    document.body.style.overflow = '';
+    currentShowData = null;
+  }
+
+  function renderSeasonEpisodes(tvId, seasonNum) {
+    episodesLoading.classList.add('active');
+    showEpisodes.innerHTML = '';
+    showEpisodes.appendChild(episodesLoading);
+
+    fetchTMDB('/tv/' + tvId + '/season/' + seasonNum).then(function (seasonData) {
+      episodesLoading.classList.remove('active');
+      showEpisodes.innerHTML = '';
+
+      var episodes = seasonData.episodes || [];
+      var seasonName = seasonData.name || ('Season ' + seasonNum);
+
+      episodes.forEach(function (ep) {
+        var card = document.createElement('div');
+        card.className = 'episode-card';
+
+        var thumb = document.createElement('div');
+        thumb.className = 'episode-thumb';
+        var thumbImg = document.createElement('img');
+        thumbImg.loading = 'lazy';
+        var thumbSrc = ep.still_path || (currentShowData && currentShowData.backdrop_path);
+        thumbImg.src = thumbSrc ? imgURL(thumbSrc, 'w500') : '';
+        thumbImg.alt = ep.name || '';
+        thumb.appendChild(thumbImg);
+
+        var info = document.createElement('div');
+        info.className = 'episode-info';
+
+        var label = document.createElement('div');
+        label.className = 'episode-label';
+        label.textContent = 'Season ' + seasonNum + ', Episode ' + ep.episode_number;
+
+        var name = document.createElement('h3');
+        name.className = 'episode-name';
+        name.textContent = ep.name || ('Episode ' + ep.episode_number);
+
+        var desc = document.createElement('p');
+        desc.className = 'episode-desc';
+        desc.textContent = ep.overview || '';
+
+        var footer = document.createElement('div');
+        footer.className = 'episode-footer';
+        if (ep.runtime) {
+          var runtime = document.createElement('span');
+          runtime.textContent = ep.runtime + ' min';
+          footer.appendChild(runtime);
+        }
+        if (ep.air_date) {
+          var date = document.createElement('span');
+          var d = new Date(ep.air_date);
+          date.textContent = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+          footer.appendChild(date);
+        }
+        var hdBadge = document.createElement('span');
+        hdBadge.className = 'ep-badge';
+        hdBadge.textContent = 'HD';
+        footer.appendChild(hdBadge);
+
+        info.appendChild(label);
+        info.appendChild(name);
+        info.appendChild(desc);
+        info.appendChild(footer);
+
+        card.appendChild(thumb);
+        card.appendChild(info);
+
+        card.addEventListener('click', function () {
+          openPlayer(currentShowData, 'tv');
+          setTimeout(function () {
+            if (seasonSelect) seasonSelect.value = seasonNum;
+            if (seasonSelect) seasonSelect.dispatchEvent(new Event('change'));
+            setTimeout(function () {
+              if (episodeSelect) episodeSelect.value = ep.episode_number;
+              if (episodeSelect) episodeSelect.dispatchEvent(new Event('change'));
+            }, 600);
+          }, 500);
+        });
+
+        showEpisodes.appendChild(card);
+      });
+
+      var synLabel = document.createElement('div');
+      synLabel.className = 'syn-label';
+      synLabel.textContent = seasonName + ' · ' + episodes.length + ' Episodes';
+
+      var synText = document.createElement('div');
+      synText.className = 'syn-text';
+      synText.textContent = currentShowData ? currentShowData.overview || '' : '';
+
+      showSynopsis.innerHTML = '';
+      showSynopsis.appendChild(synLabel);
+      showSynopsis.appendChild(synText);
+    });
+  }
+
+  function renderSimilarShows(tvId) {
+    showSimilarTrack.innerHTML = '';
+    fetchTMDB('/tv/' + tvId + '/similar').then(function (shows) {
+      var items = (shows || []).slice(0, 15);
+      items.forEach(function (show) {
+        var card = document.createElement('div');
+        card.className = 'show-similar-card';
+
+        var poster = document.createElement('div');
+        poster.className = 'similar-poster';
+        var img = document.createElement('img');
+        img.loading = 'lazy';
+        var src = show.poster_path || show.backdrop_path;
+        img.src = src ? imgURL(src) : '';
+        img.alt = show.name || '';
+        poster.appendChild(img);
+
+        var name = document.createElement('div');
+        name.className = 'similar-name';
+        name.textContent = show.name || '';
+
+        card.appendChild(poster);
+        card.appendChild(name);
+        card.addEventListener('click', function () {
+          openShowPage(show);
+          showPage.scrollTop = 0;
+        });
+        showSimilarTrack.appendChild(card);
+      });
+    });
   }
 
   function closeDetail() {
@@ -610,6 +830,24 @@
       navBtns[i].addEventListener('click', function () { setFilter(this.getAttribute('data-filter')); });
     }
     detailClose.addEventListener('click', closeDetail);
+
+    // Show page events
+    if (showBackBtn) {
+      showBackBtn.addEventListener('click', function () {
+        closeShowPage();
+      });
+    }
+    if (seasonBtn) {
+      seasonBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        seasonDropdown.classList.toggle('open');
+      });
+    }
+    document.addEventListener('click', function (e) {
+      if (seasonDropdown && !e.target.closest('.season-selector')) {
+        seasonDropdown.classList.remove('open');
+      }
+    });
 
     // Hamburger menu toggle
     var hamburger = document.getElementById('hamburger');

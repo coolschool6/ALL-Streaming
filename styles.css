@@ -644,6 +644,8 @@ img {
 }
 
 /* ===== PLAYER MODAL ===== */
+
+/* ===== PLAYER MODAL ===== */
 .player-modal {
   position: fixed;
   inset: 0;
@@ -856,6 +858,386 @@ img {
 .detail-actions {
   display: flex;
   gap: 12px;
+}
+
+/* ===== FULL-PAGE SHOW VIEW (Dulo-style) ===== */
+.show-page {
+  position: fixed;
+  inset: 0;
+  z-index: 9997;
+  background: var(--bg);
+  display: none;
+  flex-direction: column;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #444 transparent;
+}
+
+.show-page.active {
+  display: flex;
+}
+
+.show-backdrop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 55vh;
+  min-height: 380px;
+  background-size: cover;
+  background-position: center top;
+  z-index: 0;
+}
+
+.show-backdrop-gradient {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 55vh;
+  min-height: 380px;
+  z-index: 1;
+  background:
+    linear-gradient(to bottom, rgba(17,17,17,0.4) 0%, rgba(17,17,17,0.1) 30%, rgba(17,17,17,0.6) 70%, var(--bg) 100%),
+    linear-gradient(to right, rgba(17,17,17,0.8) 0%, transparent 60%);
+  pointer-events: none;
+}
+
+.show-top-bar {
+  position: relative;
+  z-index: 2;
+  padding: 20px 32px;
+}
+
+.show-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 18px;
+  background: rgba(0,0,0,0.5);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 8px;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background 0.2s;
+  cursor: pointer;
+  min-height: 44px;
+}
+
+.show-back-btn:hover {
+  background: rgba(255,255,255,0.12);
+}
+
+.show-header {
+  position: relative;
+  z-index: 2;
+  padding: 0 32px;
+  margin-top: -40px;
+}
+
+.show-title {
+  font-family: 'Grenze Gotisch', serif;
+  font-size: clamp(2rem, 5vw, 3rem);
+  font-weight: 700;
+  line-height: 1.1;
+  margin-bottom: 14px;
+  text-shadow: 0 2px 20px rgba(0,0,0,0.5);
+}
+
+.show-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 14px;
+  color: var(--text-muted);
+  margin-bottom: 20px;
+}
+
+.show-meta .meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.show-meta .meta-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--text-dim);
+}
+
+.show-meta .meta-rating {
+  padding: 3px 8px;
+  border: 1px solid rgba(255,255,255,0.3);
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.show-meta .meta-imdb {
+  background: rgba(245,197,24,0.15);
+  color: #f5c518;
+  border-color: rgba(245,197,24,0.3);
+}
+
+.show-toolbar {
+  position: relative;
+  z-index: 2;
+  padding: 0 32px;
+  margin-bottom: 8px;
+}
+
+.season-selector {
+  position: relative;
+  display: inline-block;
+}
+
+.season-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 18px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 8px;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+  min-height: 44px;
+}
+
+.season-btn:hover {
+  background: rgba(255,255,255,0.14);
+}
+
+.season-dropdown {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 200px;
+  background: #222;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+  z-index: 10;
+  overflow: hidden;
+}
+
+.season-dropdown.open {
+  display: block;
+}
+
+.season-option {
+  display: block;
+  width: 100%;
+  padding: 12px 18px;
+  text-align: left;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  border: none;
+  background: none;
+  font-family: inherit;
+  min-height: 44px;
+}
+
+.season-option:hover {
+  background: rgba(255,255,255,0.08);
+  color: #fff;
+}
+
+.season-option.active {
+  color: #fff;
+  background: rgba(229,9,20,0.2);
+}
+
+.show-episodes {
+  position: relative;
+  z-index: 2;
+  padding: 16px 32px;
+}
+
+.episodes-loading {
+  display: none;
+  justify-content: center;
+  padding: 60px 0;
+}
+
+.episodes-loading.active {
+  display: flex;
+}
+
+.episode-card {
+  display: flex;
+  gap: 20px;
+  padding: 18px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.2s;
+  margin-bottom: 4px;
+  min-height: 130px;
+}
+
+.episode-card:hover {
+  background: rgba(255,255,255,0.05);
+}
+
+.episode-thumb {
+  flex-shrink: 0;
+  width: 200px;
+  aspect-ratio: 16 / 9;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-card);
+}
+
+.episode-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.episode-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.episode-label {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.episode-name {
+  font-family: 'Grenze Gotisch', serif;
+  font-size: 1.15rem;
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: #fff;
+}
+
+.episode-desc {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+
+.episode-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--text-dim);
+  flex-wrap: wrap;
+}
+
+.episode-footer .ep-badge {
+  padding: 2px 8px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.show-synopsis {
+  position: relative;
+  z-index: 2;
+  padding: 20px 32px 28px;
+  max-width: 720px;
+}
+
+.show-synopsis .syn-label {
+  font-size: 12px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+.show-synopsis .syn-season {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.show-synopsis .syn-text {
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text-muted);
+}
+
+.show-similar {
+  position: relative;
+  z-index: 2;
+  padding: 0 32px 60px;
+}
+
+.show-similar-title {
+  font-family: 'Grenze Gotisch', serif;
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
+.show-similar-track {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 8px;
+}
+
+.show-similar-track::-webkit-scrollbar {
+  display: none;
+}
+
+.show-similar-card {
+  flex: 0 0 auto;
+  width: 140px;
+  cursor: pointer;
+  transition: transform 0.25s;
+}
+
+.show-similar-card:hover {
+  transform: scale(1.05);
+}
+
+.show-similar-card .similar-poster {
+  width: 140px;
+  height: 210px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-card);
+}
+
+.show-similar-card .similar-poster img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.show-similar-card .similar-name {
+  font-size: 12px;
+  font-weight: 500;
+  margin-top: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ===== FOOTER ===== */
@@ -1107,6 +1489,8 @@ img {
     border-radius: 10px;
   }
 
+
+
   .detail-content {
     width: 95%;
     max-height: 90vh;
@@ -1141,6 +1525,60 @@ img {
 
   .detail-actions {
     justify-content: center;
+  }
+
+  /* SHOW PAGE MOBILE */
+  .show-top-bar,
+  .show-header,
+  .show-toolbar,
+  .show-episodes,
+  .show-synopsis,
+  .show-similar {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .show-backdrop {
+    height: 45vh;
+    min-height: 280px;
+  }
+
+  .show-backdrop-gradient {
+    height: 45vh;
+    min-height: 280px;
+  }
+
+  .show-title {
+    font-size: 1.75rem;
+  }
+
+  .episode-card {
+    gap: 12px;
+    padding: 12px;
+    min-height: 110px;
+  }
+
+  .episode-thumb {
+    width: 140px;
+    flex-shrink: 0;
+  }
+
+  .episode-name {
+    font-size: 1rem;
+  }
+
+  .episode-desc {
+    font-size: 12px;
+    -webkit-line-clamp: 2;
+  }
+
+  .show-similar-card {
+    width: 115px;
+  }
+
+  .show-similar-card .similar-poster {
+    width: 115px;
+    height: 172px;
   }
 
   .player-header {
@@ -1247,6 +1685,28 @@ img {
   .channel-card {
     width: 110px;
     height: 62px;
+  }
+
+
+
+  /* SHOW PAGE SMALL MOBILE */
+  .episode-card {
+    flex-direction: column;
+    gap: 10px;
+    min-height: auto;
+  }
+
+  .episode-thumb {
+    width: 100%;
+  }
+
+  .show-similar-card {
+    width: 105px;
+  }
+
+  .show-similar-card .similar-poster {
+    width: 105px;
+    height: 157px;
   }
 
   .search-results-grid {
