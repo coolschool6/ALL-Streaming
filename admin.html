@@ -68,6 +68,22 @@
       <textarea id="json-output" readonly></textarea>
       <button class="copy-btn" id="btn-copy">Copy to Clipboard</button>
     </div>
+
+    <hr style="border: 0; border-top: 1px solid #27272a; margin: 30px 0;">
+
+    <h2>Activation Log</h2>
+    <p id="activation-status" class="loading-msg">Loading activations...</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Key Used</th>
+          <th>Device</th>
+          <th>Activated</th>
+        </tr>
+      </thead>
+      <tbody id="activations-table-body">
+      </tbody>
+    </table>
   </div>
 
   <script>
@@ -162,7 +178,57 @@
 
     fetchCurrentKeys().then(function () {
       renderTable();
+      renderActivations();
     });
+
+    function renderActivations() {
+      var tbody = document.getElementById('activations-table-body');
+      var status = document.getElementById('activation-status');
+      tbody.innerHTML = '';
+
+      fetch('/api/activations')
+        .then(function (res) {
+          if (!res.ok) throw new Error('Failed to load');
+          return res.json();
+        })
+        .then(function (activations) {
+          if (!activations || activations.length === 0) {
+            status.textContent = 'No activations yet.';
+            return;
+          }
+          status.textContent = activations.length + ' activation(s) recorded';
+          activations.forEach(function (a) {
+            var tr = document.createElement('tr');
+
+            var tdKey = document.createElement('td');
+            tdKey.textContent = a.key;
+            tdKey.style.fontWeight = '600';
+            tr.appendChild(tdKey);
+
+            var tdDevice = document.createElement('td');
+            var deviceStr = a.device || 'Unknown';
+            if (deviceStr.length > 60) deviceStr = deviceStr.substring(0, 60) + '...';
+            tdDevice.textContent = deviceStr;
+            tdDevice.style.fontSize = '12px';
+            tdDevice.style.color = '#888';
+            tr.appendChild(tdDevice);
+
+            var tdTime = document.createElement('td');
+            if (a.activatedAt) {
+              var d = new Date(a.activatedAt);
+              tdTime.textContent = d.toLocaleDateString() + ' ' + d.toLocaleTimeString();
+            } else {
+              tdTime.textContent = 'Unknown';
+            }
+            tr.appendChild(tdTime);
+
+            tbody.appendChild(tr);
+          });
+        })
+        .catch(function () {
+          status.textContent = 'Could not load activations. KV may not be linked yet.';
+        });
+    }
   </script>
 </body>
 </html>
