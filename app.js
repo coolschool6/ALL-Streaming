@@ -395,6 +395,7 @@
     var poster = document.createElement('div');
     poster.className = 'card-poster';
     var img = document.createElement('img');
+    img.loading = 'lazy';
     var src = item.poster_path || item.backdrop_path;
     img.src = src ? imgURL(src) : '';
     img.alt = item.title || item.name || '';
@@ -423,6 +424,7 @@
     var posterWrap = document.createElement('div');
     posterWrap.className = 'top-card-poster';
     var img = document.createElement('img');
+    img.loading = 'lazy';
     var src = item.poster_path || item.backdrop_path;
     img.src = src ? imgURL(src) : '';
     posterWrap.appendChild(img);

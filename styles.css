@@ -87,9 +87,9 @@ img {
   flex-direction: column;
   justify-content: center;
   gap: 5px;
-  width: 32px;
-  height: 32px;
-  padding: 4px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 6px;
   z-index: 10;
 }
 
@@ -120,12 +120,15 @@ img {
 }
 
 .nav-btn {
-  padding: 8px 16px;
+  padding: 10px 18px;
   font-size: 14px;
   font-weight: 500;
   color: var(--text-muted);
   border-radius: 20px;
   transition: color 0.2s, background 0.2s;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
 }
 
 .nav-btn:hover {
@@ -146,6 +149,11 @@ img {
 
 .search-toggle {
   padding: 8px;
+  min-width: 48px;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   color: var(--text-muted);
   transition: color 0.2s;
 }
@@ -183,6 +191,7 @@ img {
   color: var(--text);
   font-size: 14px;
   font-family: inherit;
+  min-height: 44px;
 }
 
 .search-bar input::placeholder {
@@ -194,6 +203,11 @@ img {
   color: var(--text-muted);
   line-height: 1;
   transition: color 0.2s;
+  min-width: 48px;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .search-close:hover {
@@ -262,7 +276,7 @@ img {
 
 .hero-title {
   font-family: 'Grenze Gotisch', serif;
-  font-size: 52px;
+  font-size: clamp(1.75rem, 5vw, 3.25rem);
   font-weight: 700;
   line-height: 1.1;
   margin-bottom: 16px;
@@ -326,8 +340,8 @@ img {
 }
 
 .hero-dot {
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
   background: rgba(255,255,255,0.3);
   cursor: pointer;
@@ -382,7 +396,7 @@ img {
 
 .row-title {
   font-family: 'Grenze Gotisch', serif;
-  font-size: 24px;
+  font-size: clamp(1.125rem, 3vw, 1.5rem);
   font-weight: 600;
 }
 
@@ -638,6 +652,11 @@ img {
   color: var(--text-muted);
   transition: color 0.2s;
   line-height: 1;
+  min-width: 48px;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .player-close:hover {
@@ -679,6 +698,7 @@ img {
   justify-content: center;
   padding: 0 24px 24px;
   position: relative;
+  padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
 }
 
 .player-wrap iframe {
@@ -741,6 +761,11 @@ img {
   color: var(--text-muted);
   z-index: 2;
   transition: color 0.2s;
+  min-width: 48px;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .detail-close:hover {
@@ -770,7 +795,7 @@ img {
 
 .detail-title {
   font-family: 'Grenze Gotisch', serif;
-  font-size: 32px;
+  font-size: clamp(1.5rem, 4vw, 2rem);
   font-weight: 700;
   margin-bottom: 12px;
 }
@@ -836,7 +861,7 @@ img {
 
 .search-results-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 16px;
 }
 
@@ -860,10 +885,6 @@ img {
   .hero-content {
     left: 24px;
     max-width: 420px;
-  }
-
-  .hero-title {
-    font-size: 40px;
   }
 
   .category-row {
@@ -927,10 +948,11 @@ img {
   }
 
   .nav-btn {
-    padding: 12px 16px;
+    padding: 14px 16px;
     font-size: 15px;
     border-radius: 8px;
     text-align: left;
+    min-height: 48px;
   }
 
   .nav-btn:active {
@@ -962,7 +984,6 @@ img {
   }
 
   .hero-title {
-    font-size: 28px;
     line-height: 1.15;
     margin-bottom: 10px;
   }
@@ -991,8 +1012,8 @@ img {
   }
 
   .hero-dot {
-    width: 8px;
-    height: 8px;
+    width: 12px;
+    height: 12px;
   }
 
   #content {
@@ -1010,7 +1031,7 @@ img {
   }
 
   .row-title {
-    font-size: 18px;
+    margin-bottom: 16px;
   }
 
   .cards-track {
@@ -1073,7 +1094,6 @@ img {
   }
 
   .detail-title {
-    font-size: 24px;
     margin-bottom: 8px;
   }
 
@@ -1120,6 +1140,7 @@ img {
 
   .player-wrap {
     padding: 0 4px 8px;
+    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
   }
 
   .search-row {
@@ -1128,7 +1149,6 @@ img {
   }
 
   .search-results-grid {
-    grid-template-columns: repeat(3, 1fr);
     gap: 10px;
   }
 
@@ -1145,6 +1165,12 @@ img {
     background: rgba(17,17,17,0.98);
     backdrop-filter: blur(12px);
     z-index: 998;
+    animation: searchSlideDown 0.25s ease;
+  }
+
+  @keyframes searchSlideDown {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
   }
 }
 
@@ -1153,10 +1179,6 @@ img {
   .hero {
     height: 50vh;
     min-height: 300px;
-  }
-
-  .hero-title {
-    font-size: 24px;
   }
 
   .hero-overview {
@@ -1197,7 +1219,6 @@ img {
   }
 
   .search-results-grid {
-    grid-template-columns: repeat(2, 1fr);
     gap: 8px;
   }
 

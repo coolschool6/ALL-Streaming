@@ -154,7 +154,7 @@
   }
   .paywall-content h2 {
     font-family: 'Grenze Gotisch', serif;
-    font-size: 28px;
+    font-size: clamp(1.5rem, 5vw, 1.75rem);
     margin-bottom: 12px;
     color: var(--accent);
   }
@@ -184,6 +184,7 @@
     margin-bottom: 12px;
     outline: none;
     transition: border-color 0.2s;
+    min-height: 48px;
   }
   .paywall-content input:focus {
     border-color: var(--accent);
@@ -199,6 +200,10 @@
     margin-top: 8px;
     text-decoration: none;
     transition: opacity 0.2s, transform 0.1s;
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
   .whatsapp-btn:hover {
     opacity: 0.9;
@@ -216,8 +221,8 @@
     background: none;
     border: 1px solid rgba(255,255,255,0.2);
     color: #aaa;
-    width: 24px;
-    height: 24px;
+    min-width: 44px;
+    min-height: 44px;
     border-radius: 50%;
     font-size: 14px;
     line-height: 1;
@@ -236,9 +241,6 @@
   @media (max-width: 480px) {
     .paywall-content {
       padding: 24px 20px;
-    }
-    .paywall-content h2 {
-      font-size: 24px;
     }
   }
   </style>
