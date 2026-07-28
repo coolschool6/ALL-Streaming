@@ -616,14 +616,14 @@ img {
   align-items: center;
   justify-content: center;
   border-radius: 14px;
-  background: rgba(255,255,255,0.045);
+  background: rgba(255,255,255,0.08);
   box-shadow: 0 10px 26px rgba(0,0,0,0.2);
   border: 1px solid rgba(255,255,255,0.06);
   cursor: pointer;
   transition: transform 0.3s, border-color 0.3s;
   scroll-snap-align: start;
   text-decoration: none;
-  padding: 16px;
+  padding: 8px 16px;
 }
 
 .channel-card:hover {
@@ -640,15 +640,9 @@ img {
 }
 
 .channel-logo img {
-  max-height: 70%;
-  max-width: 80%;
+  max-width: 100%;
+  max-height: 100%;
   object-fit: contain;
-  filter: brightness(0.95);
-  transition: filter 0.3s;
-}
-
-.channel-card:hover .channel-logo img {
-  filter: brightness(1.1);
 }
 
 /* ===== PLAYER MODAL ===== */
@@ -1361,9 +1355,6 @@ img {
     width: 150px;
   }
 
-  .channel-card:hover {
-    transform: scale(1.05);
-  }
 }
 
 /* ===== RESPONSIVE: MOBILE ===== */
@@ -1538,14 +1529,8 @@ img {
   .channel-card {
     width: 140px;
     border-radius: 10px;
-    padding: 12px;
+    padding: 8px 14px;
   }
-
-  .channel-card:hover {
-    transform: scale(1.05);
-  }
-
-
 
   .detail-content {
     width: 95%;
@@ -1729,7 +1714,7 @@ img {
   .channel-card {
     width: 120px;
     border-radius: 10px;
-    padding: 10px;
+    padding: 6px 12px;
   }
 
 
