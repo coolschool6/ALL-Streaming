@@ -110,6 +110,7 @@
   var API_KEY = 'cd27a14dfc1752e04b474124a5af6d2b';
   var BASE = 'https://api.themoviedb.org/3';
   var IMG = 'https://image.tmdb.org/t/p/';
+  var currentLang = localStorage.getItem('asfr_lang') || 'en';
 
   var SERVERS = [
     { name: 'Server 1 (2Embed - Default)', type: '2embed', movie: 'https://www.2embed.cc/embed/', tv: 'https://www.2embed.cc/embedtv/' },
@@ -186,7 +187,7 @@
 
   function fetchTMDB(endpoint) {
     var sep = endpoint.indexOf('?') === -1 ? '?' : '&';
-    return fetch(BASE + endpoint + sep + 'api_key=' + API_KEY)
+    return fetch(BASE + endpoint + sep + 'api_key=' + API_KEY + '&language=' + currentLang)
       .then(function (res) {
         if (!res.ok) throw new Error('TMDB error');
         return res.json();
@@ -584,27 +585,19 @@
 
   function init() {
     loading.style.display = 'flex';
-    Promise.all([
-      fetchTMDB('/trending/movie/week'),
-      fetchTMDB('/trending/tv/week'),
-      fetchTMDB('/movie/popular'),
-      fetchTMDB('/tv/popular'),
-      fetchTMDB('/movie/top_rated'),
-      fetchTMDB('/tv/top_rated')
-    ]).then(function (results) {
-      loading.style.display = 'none';
-      initHero(results[0].slice(0, 8));
 
-      var fragment = document.createDocumentFragment();
-      fragment.appendChild(createCategoryRow('Trending Movies', results[0], 'movie', false));
-      fragment.appendChild(createChannelsRow());
-      fragment.appendChild(createCategoryRow('Top 10 TV Shows', results[5], 'tv', true));
-      fragment.appendChild(createCategoryRow('Top 10 Movies', results[4], 'movie', true));
-      fragment.appendChild(createCategoryRow('Popular Movies', results[2], 'movie', false));
-      fragment.appendChild(createCategoryRow('Popular Shows', results[3], 'tv', false));
-      content.appendChild(fragment);
-      setFilter(currentFilter);
-    });
+    var langSelect = document.getElementById('lang-select');
+    if (langSelect) {
+      langSelect.value = currentLang;
+      langSelect.addEventListener('change', function () {
+        currentLang = this.value;
+        localStorage.setItem('asfr_lang', currentLang);
+        clearSearchResults();
+        loadContent();
+      });
+    }
+
+    loadContent();
 
     seasonSelect.addEventListener('change', function () { if (currentMedia) updateEpisodes(currentMedia.item.id, this.value); });
     episodeSelect.addEventListener('change', function () { if (currentMedia) loadServer(serverSelect ? parseInt(serverSelect.value, 10) : 0); });
@@ -638,6 +631,35 @@
     window.addEventListener('scroll', function () {
       var nav = document.querySelector('.navbar');
       if (nav) nav.classList.toggle('scrolled', window.scrollY > 50);
+    });
+  }
+
+  function loadContent() {
+    var existingRows = content.querySelectorAll('.category-row');
+    for (var i = 0; i < existingRows.length; i++) existingRows[i].remove();
+
+    loading.style.display = 'flex';
+    Promise.all([
+      fetchTMDB('/trending/movie/week'),
+      fetchTMDB('/trending/tv/week'),
+      fetchTMDB('/movie/popular'),
+      fetchTMDB('/tv/popular'),
+      fetchTMDB('/movie/top_rated'),
+      fetchTMDB('/tv/top_rated')
+    ]).then(function (results) {
+      loading.style.display = 'none';
+      initHero(results[0].slice(0, 8));
+
+      var fragment = document.createDocumentFragment();
+      fragment.appendChild(createCategoryRow('Trending Movies', results[0], 'movie', false));
+      fragment.appendChild(createChannelsRow());
+      fragment.appendChild(createCategoryRow('Top 10 TV Shows', results[5], 'tv', true));
+      fragment.appendChild(createCategoryRow('Top 10 Movies', results[4], 'movie', true));
+      fragment.appendChild(createCategoryRow('Popular Movies', results[2], 'movie', false));
+      fragment.appendChild(createCategoryRow('Popular Shows', results[3], 'tv', false));
+      content.appendChild(fragment);
+      setFilter(currentFilter);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     });
   }
 

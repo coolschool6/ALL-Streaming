@@ -162,6 +162,30 @@ img {
   color: var(--text);
 }
 
+.lang-select {
+  background: rgba(255,255,255,0.1);
+  color: var(--text);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  outline: none;
+  min-height: 44px;
+  transition: border-color 0.2s;
+  appearance: auto;
+}
+
+.lang-select:focus {
+  border-color: var(--accent);
+}
+
+.lang-select option {
+  background: #1a1a1a;
+  color: var(--text);
+}
+
 .search-bar {
   display: none;
   align-items: center;
@@ -961,6 +985,13 @@ img {
 
   .subscription-badge {
     margin-right: 8px;
+  }
+
+  .lang-select {
+    padding: 4px 6px;
+    font-size: 12px;
+    min-height: 40px;
+    border-radius: 4px;
   }
 
   .badge-text {
