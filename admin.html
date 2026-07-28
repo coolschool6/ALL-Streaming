@@ -56,8 +56,7 @@
       <thead>
         <tr>
           <th>Key Code</th>
-          <th>Expires</th>
-          <th>Status</th>
+          <th>Duration</th>
         </tr>
       </thead>
       <tbody id="keys-table-body">
@@ -92,19 +91,15 @@
       var tbody = document.getElementById('keys-table-body');
       var status = document.getElementById('keys-status');
       tbody.innerHTML = '';
-      var now = Date.now();
       var hasKeys = false;
 
       for (var key in currentKeys) {
         if (!currentKeys.hasOwnProperty(key)) continue;
         hasKeys = true;
-        var expiryTime = currentKeys[key];
-        if (typeof expiryTime === 'object' && expiryTime !== null) {
-          expiryTime = expiryTime.expiry || 0;
+        var duration = currentKeys[key];
+        if (typeof duration === 'object' && duration !== null) {
+          duration = duration.duration || duration.days || 30;
         }
-        var isExpired = now > expiryTime;
-        var timeLeftMs = expiryTime - now;
-        var daysLeft = Math.ceil(timeLeftMs / (1000 * 60 * 60 * 24));
 
         var tr = document.createElement('tr');
 
@@ -112,14 +107,9 @@
         tdKey.textContent = key;
         tr.appendChild(tdKey);
 
-        var tdTime = document.createElement('td');
-        tdTime.textContent = isExpired ? 'Expired' : daysLeft + ' days left (' + new Date(expiryTime).toLocaleDateString() + ')';
-        tr.appendChild(tdTime);
-
-        var tdStatus = document.createElement('td');
-        tdStatus.className = isExpired ? 'status-expired' : 'status-active';
-        tdStatus.textContent = isExpired ? 'Expired' : 'Active';
-        tr.appendChild(tdStatus);
+        var tdDuration = document.createElement('td');
+        tdDuration.textContent = duration + ' days (starts on first use)';
+        tr.appendChild(tdDuration);
 
         tbody.appendChild(tr);
       }
@@ -127,7 +117,7 @@
       if (!hasKeys) {
         var tr = document.createElement('tr');
         var td = document.createElement('td');
-        td.colSpan = 3;
+        td.colSpan = 2;
         td.textContent = 'No keys yet. Generate one above.';
         td.style.color = '#888';
         tr.appendChild(td);
@@ -155,8 +145,7 @@
         if (!confirm('Key "' + keyName + '" already exists. Replace it?')) return;
       }
 
-      var expiryTimestamp = Date.now() + (days * 24 * 60 * 60 * 1000);
-      currentKeys[keyName] = expiryTimestamp;
+      currentKeys[keyName] = days;
 
       document.getElementById('new-key-name').value = '';
       renderTable();

@@ -2,6 +2,9 @@
   'use strict';
 
   // ===== MANUAL KEY PAYWALL SYSTEM (SHARED JSON) =====
+  // keys.json format: { "KEY_NAME": durationInDays }
+  // localStorage saves the user's personal expiry after first activation
+
   var cachedKeys = {};
 
   function fetchKeys() {
@@ -29,26 +32,25 @@
     if (!overlay) return;
 
     var savedKey = localStorage.getItem('asfr_access_key');
+    var expiryTime = localStorage.getItem('asfr_expiry_time');
     var now = Date.now();
     var validKeys = getActiveKeys();
 
-    var keyRecord = validKeys[savedKey];
-    var masterExpiry = keyRecord ? (typeof keyRecord === 'object' ? keyRecord.expiry : keyRecord) : 0;
+    // Key must exist in keys.json AND personal expiry must not have passed
+    var keyExists = savedKey && validKeys[savedKey] !== undefined;
+    var notExpired = expiryTime && now < parseInt(expiryTime, 10);
 
-    var isKeyValid = savedKey && 
-                     keyRecord && 
-                     now < parseInt(masterExpiry, 10);
-
-    if (isKeyValid) {
+    if (keyExists && notExpired) {
       overlay.style.display = 'none';
       if (badge && daysLeftEl) {
-        var timeLeftMs = parseInt(masterExpiry, 10) - now;
+        var timeLeftMs = parseInt(expiryTime, 10) - now;
         var daysLeft = Math.ceil(timeLeftMs / (1000 * 60 * 60 * 24));
         daysLeftEl.textContent = daysLeft;
         badge.style.display = 'flex';
       }
     } else {
       localStorage.removeItem('asfr_access_key');
+      localStorage.removeItem('asfr_expiry_time');
       overlay.style.display = 'flex';
       if (badge) badge.style.display = 'none';
     }
@@ -65,19 +67,21 @@
       var enteredKey = keyInput.value.trim();
       var validKeys = getActiveKeys();
       
-      if (validKeys[enteredKey]) {
-        var record = validKeys[enteredKey];
-        var expiry = typeof record === 'object' ? record.expiry : record;
-        
-        if (Date.now() > expiry) {
-          errorMsg.textContent = 'This key has expired.';
-          return;
+      if (validKeys[enteredKey] !== undefined) {
+        var durationDays = validKeys[enteredKey];
+        if (typeof durationDays === 'object' && durationDays !== null) {
+          durationDays = durationDays.duration || durationDays.days || 30;
         }
+        durationDays = parseInt(durationDays, 10) || 30;
+
+        // Calculate personal expiry from NOW (countdown starts on first use)
+        var expiry = Date.now() + (durationDays * 24 * 60 * 60 * 1000);
 
         localStorage.setItem('asfr_access_key', enteredKey);
+        localStorage.setItem('asfr_expiry_time', expiry.toString());
         
         document.getElementById('paywall-overlay').style.display = 'none';
-        alert('Access granted!');
+        alert('Access granted! You have ' + durationDays + ' days.');
         window.location.reload();
       } else {
         errorMsg.textContent = 'Invalid key. Contact WhatsApp to purchase a valid key.';
@@ -94,6 +98,7 @@
       if (logoutBtn) {
         logoutBtn.addEventListener('click', function () {
           localStorage.removeItem('asfr_access_key');
+          localStorage.removeItem('asfr_expiry_time');
           window.location.reload();
         });
       }
