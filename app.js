@@ -79,16 +79,6 @@
 
         localStorage.setItem('asfr_access_key', enteredKey);
         localStorage.setItem('asfr_expiry_time', expiry.toString());
-
-        // Log activation to admin dashboard
-        fetch('/api/activate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            key: enteredKey,
-            device: navigator.userAgent
-          })
-        }).catch(function () {});
         
         document.getElementById('paywall-overlay').style.display = 'none';
         alert('Access granted! You have ' + durationDays + ' days.');
