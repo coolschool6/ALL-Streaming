@@ -15,7 +15,10 @@
   <nav class="navbar">
     <div class="nav-left">
       <a href="#" class="logo">ALLStreaming</a>
-      <div class="nav-links">
+      <button class="hamburger" id="hamburger" aria-label="Menu">
+        <span></span><span></span><span></span>
+      </button>
+      <div class="nav-links" id="nav-links">
         <button class="nav-btn active" data-filter="all">Home</button>
         <button class="nav-btn" data-filter="movie">Movies</button>
         <button class="nav-btn" data-filter="tv">Shows</button>
@@ -23,7 +26,7 @@
     </div>
     <div class="nav-right">
       <div id="sub-badge" class="subscription-badge" style="display:none;" title="Subscription Status">
-        ⏳ <span id="sub-days-left">0</span> days left
+        <span class="badge-text">⏳ <span id="sub-days-left">0</span> days left</span>
         <button id="btn-logout" class="logout-btn" title="Log out">&times;</button>
       </div>
       <button class="search-toggle" id="search-toggle" aria-label="Search">
@@ -125,6 +128,7 @@
     align-items: center;
     gap: 6px;
     margin-right: 15px;
+    white-space: nowrap;
   }
   .paywall-modal {
     position: fixed;
@@ -135,22 +139,23 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    padding: 16px;
   }
   .paywall-content {
     background: #18181b;
     color: #fff;
     padding: 32px;
-    border-radius: 12px;
-    width: 90%;
-    max-width: 420px;
+    border-radius: 16px;
+    width: 100%;
+    max-width: 400px;
     text-align: center;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+    box-shadow: 0 10px 40px rgba(0,0,0,0.8);
     border: 1px solid rgba(255,255,255,0.1);
   }
   .paywall-content h2 {
     font-family: 'Grenze Gotisch', serif;
     font-size: 28px;
-    margin-bottom: 10px;
+    margin-bottom: 12px;
     color: var(--accent);
   }
   .paywall-content p {
@@ -159,17 +164,26 @@
     margin-bottom: 16px;
     line-height: 1.5;
   }
+  .paywall-content strong {
+    color: #fff;
+  }
+  .paywall-instructions {
+    font-size: 13px;
+    color: #888;
+    margin-bottom: 20px;
+  }
   .paywall-content input {
     width: 100%;
-    padding: 12px;
+    padding: 14px 16px;
     background: #27272a;
     border: 1px solid #3f3f46;
-    border-radius: 6px;
+    border-radius: 8px;
     color: #fff;
-    font-size: 15px;
+    font-size: 16px;
     text-align: center;
     margin-bottom: 12px;
     outline: none;
+    transition: border-color 0.2s;
   }
   .paywall-content input:focus {
     border-color: var(--accent);
@@ -178,28 +192,32 @@
     display: block;
     background: #25d366;
     color: #fff;
-    padding: 12px;
-    border-radius: 6px;
+    padding: 14px;
+    border-radius: 8px;
     font-weight: 600;
     font-size: 14px;
     margin-top: 8px;
     text-decoration: none;
-    transition: opacity 0.2s;
+    transition: opacity 0.2s, transform 0.1s;
   }
   .whatsapp-btn:hover {
     opacity: 0.9;
+  }
+  .whatsapp-btn:active {
+    transform: scale(0.98);
   }
   .paywall-error {
     color: #ff4d4d;
     font-size: 13px;
     margin-top: 12px;
+    min-height: 18px;
   }
   .logout-btn {
     background: none;
     border: 1px solid rgba(255,255,255,0.2);
     color: #aaa;
-    width: 22px;
-    height: 22px;
+    width: 24px;
+    height: 24px;
     border-radius: 50%;
     font-size: 14px;
     line-height: 1;
@@ -209,10 +227,19 @@
     align-items: center;
     justify-content: center;
     transition: all 0.2s;
+    flex-shrink: 0;
   }
   .logout-btn:hover {
     color: #ff4d4d;
     border-color: #ff4d4d;
+  }
+  @media (max-width: 480px) {
+    .paywall-content {
+      padding: 24px 20px;
+    }
+    .paywall-content h2 {
+      font-size: 24px;
+    }
   }
   </style>
 
