@@ -1,12 +1,25 @@
 (function () {
   'use strict';
 
-  // ===== MANUAL KEY PAYWALL SYSTEM =====
+  // ===== MANUAL KEY PAYWALL SYSTEM (SHARED JSON) =====
+  var cachedKeys = {};
+
+  function fetchKeys() {
+    return fetch('keys.json?t=' + Date.now())
+      .then(function (res) {
+        if (!res.ok) throw new Error('Failed to load keys');
+        return res.json();
+      })
+      .then(function (data) {
+        cachedKeys = data || {};
+      })
+      .catch(function () {
+        cachedKeys = {};
+      });
+  }
+
   function getActiveKeys() {
-    var data = localStorage.getItem('asfr_admin_keys');
-    return data ? JSON.parse(data) : {
-      "TT-TEST-KEY-123": { expiry: Date.now() + (30 * 24 * 60 * 60 * 1000), label: "Test Account" }
-    };
+    return cachedKeys;
   }
 
   function checkPaywall() {
@@ -16,7 +29,6 @@
     if (!overlay) return;
 
     var savedKey = localStorage.getItem('asfr_access_key');
-    var expiryTime = localStorage.getItem('asfr_expiry_time');
     var now = Date.now();
     var validKeys = getActiveKeys();
 
@@ -24,9 +36,7 @@
     var masterExpiry = keyRecord ? (typeof keyRecord === 'object' ? keyRecord.expiry : keyRecord) : 0;
 
     var isKeyValid = savedKey && 
-                     expiryTime && 
                      keyRecord && 
-                     now < parseInt(expiryTime, 10) && 
                      now < parseInt(masterExpiry, 10);
 
     if (isKeyValid) {
@@ -39,7 +49,6 @@
       }
     } else {
       localStorage.removeItem('asfr_access_key');
-      localStorage.removeItem('asfr_expiry_time');
       overlay.style.display = 'flex';
       if (badge) badge.style.display = 'none';
     }
@@ -66,7 +75,6 @@
         }
 
         localStorage.setItem('asfr_access_key', enteredKey);
-        localStorage.setItem('asfr_expiry_time', expiry);
         
         document.getElementById('paywall-overlay').style.display = 'none';
         alert('Access granted!');
@@ -78,8 +86,18 @@
   }
 
   window.addEventListener('DOMContentLoaded', function () {
-    checkPaywall();
-    setupPaywallEvents();
+    fetchKeys().then(function () {
+      checkPaywall();
+      setupPaywallEvents();
+
+      var logoutBtn = document.getElementById('btn-logout');
+      if (logoutBtn) {
+        logoutBtn.addEventListener('click', function () {
+          localStorage.removeItem('asfr_access_key');
+          window.location.reload();
+        });
+      }
+    });
   });
 
 

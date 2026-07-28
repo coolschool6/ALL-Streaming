@@ -9,24 +9,37 @@
     body { background: #0f0f11; color: #fff; font-family: 'Inter', sans-serif; padding: 20px; }
     .admin-container { max-width: 800px; margin: 40px auto; background: #18181b; padding: 30px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); }
     h1 { color: var(--accent); margin-bottom: 20px; }
+    h2 { margin-top: 30px; }
     .form-group { margin-bottom: 15px; }
     label { display: block; margin-bottom: 5px; color: #aaa; font-size: 14px; }
-    input, select { width: 100%; padding: 10px; background: #27272a; border: 1px solid #3f3f46; border-radius: 6px; color: #fff; }
+    input, textarea { width: 100%; padding: 10px; background: #27272a; border: 1px solid #3f3f46; border-radius: 6px; color: #fff; font-family: monospace; box-sizing: border-box; }
     button { background: #e50914; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: 600; }
     button:hover { opacity: 0.9; }
-    table { width: 100%; margin-top: 20px; border-collapse: collapse; text-align: left; }
+    table { width: 100%; margin-top: 10px; border-collapse: collapse; text-align: left; }
     th, td { padding: 12px; border-bottom: 1px solid #27272a; font-size: 14px; }
     th { color: #aaa; }
     .status-active { color: #25d366; font-weight: 600; }
     .status-expired { color: #ff4d4d; font-weight: 600; }
+    .output-box { margin-top: 20px; background: #111; padding: 15px; border-radius: 6px; border: 1px solid #333; }
+    .output-box textarea { height: 120px; font-size: 13px; }
+    .note { color: #aaa; font-size: 13px; margin-bottom: 20px; line-height: 1.6; }
+    .note code { background: #27272a; padding: 2px 6px; border-radius: 3px; color: #e50914; }
+    .copy-btn { background: #2563eb; margin-top: 10px; }
+    .copy-btn:hover { background: #1d4ed8; }
+    .loading-msg { color: #888; font-style: italic; }
   </style>
 </head>
 <body>
   <div class="admin-container">
-    <h1>🔑 Key Management Dashboard</h1>
+    <h1>Key Management Dashboard</h1>
+    <p class="note">
+      When you generate a key, the full updated <code>keys.json</code> content appears below.<br>
+      Copy it and paste it into your <code>keys.json</code> file in your project, then push to GitHub.<br>
+      Vercel will redeploy and the key works on all devices instantly.
+    </p>
     
     <div class="form-group">
-      <label for="new-key-name">Custom Key Name / Code (e.g., TT-JOHN-555)</label>
+      <label for="new-key-name">Key Code (e.g., TT-JOHN-555)</label>
       <input type="text" id="new-key-name" placeholder="Enter key code...">
     </div>
     
@@ -35,53 +48,66 @@
       <input type="number" id="key-duration" value="30" min="1">
     </div>
     
-    <button id="btn-create-key">Generate & Save Key</button>
+    <button id="btn-generate">Add Key & Generate JSON</button>
 
-    <hr style="border: 0; border-top: 1px solid #27272a; margin: 30px 0;">
-
-    <h2>Active Keys Database</h2>
+    <h2>Current Active Keys</h2>
+    <p id="keys-status" class="loading-msg">Loading keys from keys.json...</p>
     <table>
       <thead>
         <tr>
           <th>Key Code</th>
-          <th>Expires In / Date</th>
+          <th>Expires</th>
           <th>Status</th>
-          <th>Action</th>
         </tr>
+      </thead>
       <tbody id="keys-table-body">
-        <!-- Injected via JS -->
       </tbody>
     </table>
+
+    <div class="output-box">
+      <label for="json-output">Copy this into your <code>keys.json</code> file:</label>
+      <textarea id="json-output" readonly></textarea>
+      <button class="copy-btn" id="btn-copy">Copy to Clipboard</button>
+    </div>
   </div>
 
   <script>
-    // Uses localStorage to persist keys across your browser session
-    function getStoredKeys() {
-      var data = localStorage.getItem('asfr_admin_keys');
-      return data ? JSON.parse(data) : {
-        "TT-TEST-KEY-123": Date.now() + (30 * 24 * 60 * 60 * 1000)
-      };
-    }
+    var currentKeys = {};
 
-    function saveStoredKeys(keys) {
-      localStorage.setItem('asfr_admin_keys', JSON.stringify(keys));
+    function fetchCurrentKeys() {
+      return fetch('keys.json?t=' + Date.now())
+        .then(function (res) {
+          if (!res.ok) throw new Error('Not found');
+          return res.json();
+        })
+        .then(function (data) {
+          currentKeys = data || {};
+        })
+        .catch(function () {
+          currentKeys = {};
+        });
     }
 
     function renderTable() {
-      var keys = getStoredKeys();
       var tbody = document.getElementById('keys-table-body');
+      var status = document.getElementById('keys-status');
       tbody.innerHTML = '';
-
       var now = Date.now();
+      var hasKeys = false;
 
-      for (var key in keys) {
-        var expiryTime = keys[key];
+      for (var key in currentKeys) {
+        if (!currentKeys.hasOwnProperty(key)) continue;
+        hasKeys = true;
+        var expiryTime = currentKeys[key];
+        if (typeof expiryTime === 'object' && expiryTime !== null) {
+          expiryTime = expiryTime.expiry || 0;
+        }
         var isExpired = now > expiryTime;
         var timeLeftMs = expiryTime - now;
         var daysLeft = Math.ceil(timeLeftMs / (1000 * 60 * 60 * 24));
 
         var tr = document.createElement('tr');
-        
+
         var tdKey = document.createElement('td');
         tdKey.textContent = key;
         tr.appendChild(tdKey);
@@ -95,50 +121,59 @@
         tdStatus.textContent = isExpired ? 'Expired' : 'Active';
         tr.appendChild(tdStatus);
 
-        var tdAction = document.createElement('td');
-        var delBtn = document.createElement('button');
-        delBtn.textContent = 'Revoke';
-        delBtn.style.background = '#3f3f46';
-        delBtn.style.padding = '5px 10px';
-        delBtn.setAttribute('data-key', key);
-        delBtn.onclick = function() {
-          var k = this.getAttribute('data-key');
-          var allKeys = getStoredKeys();
-          delete allKeys[k];
-          saveStoredKeys(allKeys);
-          renderTable();
-        };
-        tdAction.appendChild(delBtn);
-        tr.appendChild(tdAction);
-
         tbody.appendChild(tr);
       }
+
+      if (!hasKeys) {
+        var tr = document.createElement('tr');
+        var td = document.createElement('td');
+        td.colSpan = 3;
+        td.textContent = 'No keys yet. Generate one above.';
+        td.style.color = '#888';
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+      }
+
+      status.textContent = 'Loaded from keys.json';
+      updateOutput();
     }
 
-    document.getElementById('btn-create-key').addEventListener('click', function() {
-      var keyInput = document.getElementById('new-key-name');
-      var durationInput = document.getElementById('key-duration');
-      
-      var keyName = keyInput.value.trim();
-      var days = parseInt(durationInput.value, 10) || 30;
+    function updateOutput() {
+      document.getElementById('json-output').value = JSON.stringify(currentKeys, null, 2);
+    }
+
+    document.getElementById('btn-generate').addEventListener('click', function () {
+      var keyName = document.getElementById('new-key-name').value.trim();
+      var days = parseInt(document.getElementById('key-duration').value, 10) || 30;
 
       if (!keyName) {
         alert('Please enter a key name.');
         return;
       }
 
-      var keys = getStoredKeys();
-      var expiryTimestamp = Date.now() + (days * 24 * 60 * 60 * 1000);
-      
-      keys[keyName] = expiryTimestamp;
-      saveStoredKeys(keys);
+      if (currentKeys[keyName]) {
+        if (!confirm('Key "' + keyName + '" already exists. Replace it?')) return;
+      }
 
-      keyInput.value = '';
+      var expiryTimestamp = Date.now() + (days * 24 * 60 * 60 * 1000);
+      currentKeys[keyName] = expiryTimestamp;
+
+      document.getElementById('new-key-name').value = '';
       renderTable();
-      alert('Key successfully generated!');
     });
 
-    renderTable();
+    document.getElementById('btn-copy').addEventListener('click', function () {
+      var textarea = document.getElementById('json-output');
+      textarea.select();
+      document.execCommand('copy');
+      this.textContent = 'Copied!';
+      var btn = this;
+      setTimeout(function () { btn.textContent = 'Copy to Clipboard'; }, 2000);
+    });
+
+    fetchCurrentKeys().then(function () {
+      renderTable();
+    });
   </script>
 </body>
 </html>

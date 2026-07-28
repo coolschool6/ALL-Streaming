@@ -24,6 +24,7 @@
     <div class="nav-right">
       <div id="sub-badge" class="subscription-badge" style="display:none;" title="Subscription Status">
         ⏳ <span id="sub-days-left">0</span> days left
+        <button id="btn-logout" class="logout-btn" title="Log out">&times;</button>
       </div>
       <button class="search-toggle" id="search-toggle" aria-label="Search">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -192,6 +193,26 @@
     color: #ff4d4d;
     font-size: 13px;
     margin-top: 12px;
+  }
+  .logout-btn {
+    background: none;
+    border: 1px solid rgba(255,255,255,0.2);
+    color: #aaa;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+  }
+  .logout-btn:hover {
+    color: #ff4d4d;
+    border-color: #ff4d4d;
   }
   </style>
 
