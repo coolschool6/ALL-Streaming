@@ -1,3 +1,14 @@
+var GAS_URL = 'https://script.google.com/macros/s/AKfycbwLLoqYeMjV3eERrQ5NXJyJmr4ZhWHwJqwcbOVuF5yy_lwHy77leaFbDrS9GyWt-5pp/exec';
+
+function gasFetch(url) {
+  return fetch(GAS_URL + '?action=fetch_url&url=' + encodeURIComponent(url))
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (d.error) throw new Error(d.error);
+      return d;
+    });
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -19,10 +30,16 @@ export default async function handler(req, res) {
       }
     });
 
+    var text = await proxyRes.text();
     var contentType = proxyRes.headers.get('content-type') || '';
 
+    if (text.includes('Just a moment') || text.includes('challenges.cloudflare')) {
+      var viaGas = await gasFetch(targetUrl);
+      text = viaGas.content;
+      contentType = viaGas.contentType || contentType;
+    }
+
     if (contentType.includes('mpegurl') || contentType.includes('m3u8') || targetUrl.includes('.m3u8')) {
-      var text = await proxyRes.text();
       var baseUrl = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
       var lines = text.split('\n');
       var rewritten = lines.map(function (line) {
@@ -31,16 +48,14 @@ export default async function handler(req, res) {
         var absUrl = trimmed.startsWith('http://') || trimmed.startsWith('https://')
           ? trimmed
           : new URL(trimmed, baseUrl).href;
-        var proxied = '/api/proxy?url=' + encodeURIComponent(absUrl);
-        if (contentType.includes('mpegurl') || contentType.includes('m3u8')) return proxied;
-        return proxied;
+        return '/api/proxy?url=' + encodeURIComponent(absUrl);
       });
       res.setHeader('Content-Type', contentType || 'application/vnd.apple.mpegurl');
       res.setHeader('Cache-Control', 'no-cache');
       return res.status(200).send(rewritten.join('\n'));
     }
 
-    var buffer = Buffer.from(await proxyRes.arrayBuffer());
+    var buffer = Buffer.from(text);
     res.setHeader('Content-Type', contentType || 'application/octet-stream');
     res.setHeader('Cache-Control', 'public, max-age=3600');
     res.setHeader('Content-Length', buffer.length);

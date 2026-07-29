@@ -64,7 +64,7 @@ export default async function handler(req, res) {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
     });
     m3u8Content = await m3u8Direct.text();
-    if (m3u8Content.includes('Just a moment')) {
+    if (m3u8Content.includes('Just a moment') || m3u8Content.includes('challenges.cloudflare')) {
       var m3u8ViaGas = await gasFetch(m3u8Url);
       m3u8Content = m3u8ViaGas.content;
     }
@@ -79,10 +79,15 @@ export default async function handler(req, res) {
         : new URL(trimmed, baseUrl).href;
       return '/api/proxy?url=' + encodeURIComponent(absUrl);
     });
+    var output = rewritten.join('\n').trim();
+
+    if (output.indexOf('#EXTM3U') === -1 && output.length > 0) {
+      output = '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=2560000,RESOLUTION=1920x1080\n' + output;
+    }
 
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
     res.setHeader('Cache-Control', 'no-cache');
-    return res.status(200).send(rewritten.join('\n'));
+    return res.status(200).send(output);
   } catch (err) {
     return res.status(500).json({ error: err.message, stack: err.stack });
   }

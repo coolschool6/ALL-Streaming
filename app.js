@@ -776,10 +776,17 @@
     var url = '/api/source?tmdbId=' + item.id + '&type=' + type;
     if (type === 'tv') url += '&season=' + sNum + '&episode=' + eNum;
 
+    console.log('[CP] attemptCustomPlayer called for', item.id, type, url);
     fetch(url).then(function (r) {
-      if (!r.ok) throw new Error('Custom source not available');
+      if (!r.ok) throw new Error('Custom source not available (status ' + r.status + ')');
+      return r.text();
+    }).then(function (body) {
+      console.log('[CP] source API returned ' + body.length + ' bytes, starts with:', body.substring(0, 60));
+      if (body.indexOf('#EXTM3U') === -1) throw new Error('Response is not HLS playlist');
       initCustomPlayer(url);
-    }).catch(function () {});
+    }).catch(function (err) {
+      console.warn('[CP] Custom player unavailable:', err.message);
+    });
   }
 
   function openPlayer(item, mediaType) {
