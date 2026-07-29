@@ -147,12 +147,12 @@
   var currentLang = localStorage.getItem('asfr_lang') || 'en';
 
   var SERVERS = [
-    { name: 'Server 1 (2Embed - Default)', type: '2embed', movie: 'https://www.2embed.cc/embed/', tv: 'https://www.2embed.cc/embedtv/' },
+    { name: 'Server 1 (VidLink)', type: 'path', movie: 'https://vidlink.pro/movie/', tv: 'https://vidlink.pro/tv/' },
     { name: 'Server 2 (AutoEmbed)', type: 'path', movie: 'https://player.autoembed.cc/embed/movie/', tv: 'https://player.autoembed.cc/embed/tv/' },
     { name: 'Server 3 (VidSrc.xyz)', type: 'query', movie: 'https://vidsrc.xyz/embed/movie?tmdb=', tv: 'https://vidsrc.xyz/embed/tv?tmdb=' },
     { name: 'Server 4 (VidSrc.me)', type: 'query', movie: 'https://vidsrc.me/embed/movie?tmdb=', tv: 'https://vidsrc.me/embed/tv?tmdb=' },
     { name: 'Server 5 (SmashyStream)', type: 'query', movie: 'https://embed.smashystream.com/playere.php?tmdb=', tv: 'https://embed.smashystream.com/playere.php?tmdb=' },
-    { name: 'Server 6 (VidLink)', type: 'path', movie: 'https://vidlink.pro/movie/', tv: 'https://vidlink.pro/tv/' }
+    { name: 'Server 6 (2Embed)', type: '2embed', movie: 'https://www.2embed.cc/embed/', tv: 'https://www.2embed.cc/embedtv/' }
   ];
 
   var content = document.getElementById('content');
@@ -743,36 +743,19 @@
     showOverlay();
   }
 
-  var overlayTimer = null;
-
   function showOverlay() {
     var overlay = document.getElementById('player-overlay');
-    var btn = document.getElementById('overlay-unlock');
     if (!overlay) return;
-    if (overlayTimer) clearTimeout(overlayTimer);
     overlay.classList.add('active');
-    if (btn) btn.style.display = '';
-  }
-
-  function setupOverlayUnlock() {
-    var btn = document.getElementById('overlay-unlock');
-    var overlay = document.getElementById('player-overlay');
-    if (!btn || !overlay) return;
-    btn.addEventListener('click', function (e) {
-      e.stopPropagation();
+    setTimeout(function () {
       overlay.classList.remove('active');
-      if (overlayTimer) clearTimeout(overlayTimer);
-      overlayTimer = setTimeout(function () {
-        overlay.classList.add('active');
-      }, 30000);
-    });
+    }, 1500);
   }
 
   function closePlayer() {
     playerIframe.src = 'about:blank';
     playerModal.classList.remove('active');
     document.body.style.overflow = '';
-    if (overlayTimer) clearTimeout(overlayTimer);
   }
 
   function setupTVControls(tvId) {
@@ -883,7 +866,6 @@
     seasonSelect.addEventListener('change', function () { if (currentMedia) updateEpisodes(currentMedia.item.id, this.value); });
     episodeSelect.addEventListener('change', function () { if (currentMedia) loadServer(serverSelect ? parseInt(serverSelect.value, 10) : 0); });
     playerClose.addEventListener('click', closePlayer);
-    setupOverlayUnlock();
     searchToggle.addEventListener('click', toggleSearch);
     searchInput.addEventListener('input', handleSearch);
     if (searchClose) searchClose.addEventListener('click', toggleSearch);
