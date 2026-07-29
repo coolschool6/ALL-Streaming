@@ -50,6 +50,14 @@ export default async function handler(req, res) {
     }
 
     var buffer = Buffer.from(await proxyRes.arrayBuffer());
+
+    if (contentType.includes('text/html') && buffer.length > 0) {
+      var head = buffer.slice(0, 20).toString();
+      if (!head.match(/^<(html|!DOCTYPE|!doctype)/i)) {
+        contentType = 'video/MP2T';
+      }
+    }
+
     res.setHeader('Content-Type', contentType || 'application/octet-stream');
     res.setHeader('Cache-Control', 'public, max-age=3600');
     res.setHeader('Content-Length', buffer.length);
