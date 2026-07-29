@@ -69,20 +69,40 @@ export default async function handler(req, res) {
       m3u8Content = m3u8ViaGas.content;
     }
 
-    var baseUrl = m3u8Url.substring(0, m3u8Url.lastIndexOf('/') + 1);
-    var lines = m3u8Content.split('\n');
-    var rewritten = lines.map(function (line) {
-      var trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) return line;
-      var absUrl = trimmed.startsWith('http://') || trimmed.startsWith('https://')
-        ? trimmed
-        : new URL(trimmed, baseUrl).href;
-      return '/api/proxy?url=' + encodeURIComponent(absUrl);
-    });
-    var output = rewritten.join('\n').trim();
+    function isUrl(s) {
+      return s.startsWith('http://') || s.startsWith('https://');
+    }
 
-    if (output.indexOf('#EXTM3U') === -1 && output.length > 0) {
-      output = '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=2560000,RESOLUTION=1920x1080\n' + output;
+    function rewriteM3u8(content, sourceUrl) {
+      var base = sourceUrl.substring(0, sourceUrl.lastIndexOf('/') + 1);
+      var linesArr = content.split('\n');
+      var result = [];
+      for (var k = 0; k < linesArr.length; k++) {
+        var t = linesArr[k].trim();
+        if (!t || t.startsWith('#')) { result.push(linesArr[k]); continue; }
+        var absolute = isUrl(t) ? t : new URL(t, base).href;
+        result.push('/api/proxy?url=' + encodeURIComponent(absolute));
+      }
+      return result.join('\n').trim();
+    }
+
+    var output = m3u8Content;
+    var resolvedUrl = m3u8Url;
+    var depth = 0;
+    while (output.indexOf('#EXTM3U') === -1 && depth < 3) {
+      var bareUrl = output.trim();
+      if (!isUrl(bareUrl)) break;
+      var gasResp = await gasFetch(bareUrl);
+      output = gasResp.content || '';
+      resolvedUrl = bareUrl;
+      depth++;
+    }
+
+    if (output.indexOf('#EXTM3U') !== -1) {
+      output = rewriteM3u8(output, resolvedUrl);
+    } else if (isUrl(output.trim())) {
+      var single = '/api/proxy?url=' + encodeURIComponent(output.trim());
+      output = '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=2560000,RESOLUTION=1920x1080\n' + single;
     }
 
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
