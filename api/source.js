@@ -55,18 +55,8 @@ export default async function handler(req, res) {
     var plData = JSON.parse(plText);
 
     var m3u8Url = plData.playlist?.[0]?.sources?.[0]?.file;
-    if (!m3u8Url) {
-      return res.status(404).json({ error: 'No m3u8 URL in playlist' });
-    }
-
-    var m3u8Content;
-    var m3u8Direct = await fetch(m3u8Url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-    });
-    m3u8Content = await m3u8Direct.text();
-    if (m3u8Content.includes('Just a moment') || m3u8Content.includes('challenges.cloudflare')) {
-      var m3u8ViaGas = await gasFetch(m3u8Url);
-      m3u8Content = m3u8ViaGas.content;
+    if (!m3u8Url || m3u8Url.indexOf('/error') !== -1 || !m3u8Url.startsWith('http')) {
+      return res.status(200).send('// stream-unavailable');
     }
 
     function isUrl(s) {
@@ -74,26 +64,46 @@ export default async function handler(req, res) {
     }
 
     function rewriteM3u8(content, sourceUrl) {
+      if (!sourceUrl || !isUrl(sourceUrl)) return content;
       var base = sourceUrl.substring(0, sourceUrl.lastIndexOf('/') + 1);
+      if (!isUrl(base)) return content;
       var linesArr = content.split('\n');
       var result = [];
       for (var k = 0; k < linesArr.length; k++) {
         var t = linesArr[k].trim();
         if (!t || t.startsWith('#')) { result.push(linesArr[k]); continue; }
-        var absolute = isUrl(t) ? t : new URL(t, base).href;
-        result.push('/api/proxy?url=' + encodeURIComponent(absolute));
+        try {
+          var absolute = isUrl(t) ? t : new URL(t, base).href;
+          result.push('/api/proxy?url=' + encodeURIComponent(absolute));
+        } catch (e) {
+          result.push(linesArr[k]);
+        }
       }
       return result.join('\n').trim();
     }
 
-    var output = m3u8Content;
+    var output;
+    try {
+      var m3u8Gas = await gasFetch(m3u8Url);
+      output = m3u8Gas.content || '';
+    } catch (e) {
+      var m3u8Direct = await fetch(m3u8Url, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+      });
+      output = await m3u8Direct.text();
+    }
+
     var resolvedUrl = m3u8Url;
     var depth = 0;
     while (output.indexOf('#EXTM3U') === -1 && depth < 3) {
       var bareUrl = output.trim();
       if (!isUrl(bareUrl)) break;
-      var gasResp = await gasFetch(bareUrl);
-      output = gasResp.content || '';
+      try {
+        var gasResp = await gasFetch(bareUrl);
+        output = gasResp.content || '';
+      } catch (e) {
+        break;
+      }
       resolvedUrl = bareUrl;
       depth++;
     }
