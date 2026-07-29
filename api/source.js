@@ -26,7 +26,8 @@ export default async function handler(req, res) {
 
     var match = html.match(/"playlist":"([^"]+)"/);
     if (!match) {
-      return res.status(404).json({ error: 'No playlist found in xpass page' });
+      var snippet = html.substring(0, 1000);
+      return res.status(404).json({ error: 'No playlist found in xpass page', snippet: snippet, length: html.length });
     }
 
     var playlistUrl = 'https://play.xpass.top' + match[1];
