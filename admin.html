@@ -7,162 +7,207 @@
   <link rel="stylesheet" href="styles.css">
   <style>
     body { background: #0f0f11; color: #fff; font-family: 'Inter', sans-serif; padding: 20px; }
-    .admin-container { max-width: 800px; margin: 40px auto; background: #18181b; padding: 30px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); }
+    .admin-container { max-width: 900px; margin: 40px auto; background: #18181b; padding: 30px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); }
     h1 { color: var(--accent); margin-bottom: 20px; }
     h2 { margin-top: 30px; }
     .form-group { margin-bottom: 15px; }
     label { display: block; margin-bottom: 5px; color: #aaa; font-size: 14px; }
-    input, textarea { width: 100%; padding: 10px; background: #27272a; border: 1px solid #3f3f46; border-radius: 6px; color: #fff; font-family: monospace; box-sizing: border-box; }
+    input { width: 100%; padding: 10px; background: #27272a; border: 1px solid #3f3f46; border-radius: 6px; color: #fff; font-family: monospace; box-sizing: border-box; }
     button { background: #e50914; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: 600; }
     button:hover { opacity: 0.9; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
     table { width: 100%; margin-top: 10px; border-collapse: collapse; text-align: left; }
     th, td { padding: 12px; border-bottom: 1px solid #27272a; font-size: 14px; }
     th { color: #aaa; }
     .status-active { color: #25d366; font-weight: 600; }
     .status-expired { color: #ff4d4d; font-weight: 600; }
-    .output-box { margin-top: 20px; background: #111; padding: 15px; border-radius: 6px; border: 1px solid #333; }
-    .output-box textarea { height: 120px; font-size: 13px; }
+    .status-not_activated { color: #fbbf24; font-weight: 600; }
+    .delete-btn { background: #dc2626; padding: 4px 12px; font-size: 12px; }
+    .delete-btn:hover { background: #b91c1c; }
+    .loading-msg { color: #888; font-style: italic; }
+    .error-msg { color: #ff4d4d; font-size: 14px; }
+    .success-msg { color: #25d366; font-size: 14px; }
     .note { color: #aaa; font-size: 13px; margin-bottom: 20px; line-height: 1.6; }
     .note code { background: #27272a; padding: 2px 6px; border-radius: 3px; color: #e50914; }
-    .copy-btn { background: #2563eb; margin-top: 10px; }
-    .copy-btn:hover { background: #1d4ed8; }
-    .loading-msg { color: #888; font-style: italic; }
+    .row { display: flex; gap: 15px; align-items: flex-end; }
+    .row .form-group { flex: 1; }
+    .row button { height: 40px; white-space: nowrap; }
+    .url-box { background: #111; padding: 12px; border-radius: 6px; border: 1px solid #333; margin-top: 20px; }
+    .url-box code { font-size: 12px; word-break: break-all; color: #60a5fa; }
   </style>
 </head>
 <body>
   <div class="admin-container">
     <h1>Key Management Dashboard</h1>
     <p class="note">
-      When you generate a key, the full updated <code>keys.json</code> content appears below.<br>
-      Copy it and paste it into your <code>keys.json</code> file in your project, then push to GitHub.<br>
-      Vercel will redeploy and the key works on all devices instantly.
+      Keys are stored in your Google Sheet. Add or delete keys below — changes take effect immediately.<br>
+      The sheet is the source of truth. Edit the sheet directly if you prefer.
     </p>
-    
-    <div class="form-group">
-      <label for="new-key-name">Key Code (e.g., TT-JOHN-555)</label>
-      <input type="text" id="new-key-name" placeholder="Enter key code...">
-    </div>
-    
-    <div class="form-group">
-      <label for="key-duration">Duration (Days)</label>
-      <input type="number" id="key-duration" value="30" min="1">
-    </div>
-    
-    <button id="btn-generate">Add Key & Generate JSON</button>
 
-    <h2>Current Active Keys</h2>
-    <p id="keys-status" class="loading-msg">Loading keys from keys.json...</p>
+    <h2>Add New Key</h2>
+    <div class="row">
+      <div class="form-group">
+        <label for="new-key-name">Key Code (e.g., TT-JOHN-555)</label>
+        <input type="text" id="new-key-name" placeholder="Enter key code...">
+      </div>
+      <div class="form-group">
+        <label for="key-duration">Duration (Days)</label>
+        <input type="number" id="key-duration" value="30" min="1">
+      </div>
+      <button id="btn-generate">Add Key</button>
+    </div>
+    <p id="add-status"></p>
+
+    <h2>All Keys</h2>
+    <p id="keys-status" class="loading-msg">Loading keys...</p>
     <table>
       <thead>
         <tr>
           <th>Key Code</th>
           <th>Duration</th>
+          <th>Status</th>
+          <th>Days Left</th>
+          <th>Notes</th>
+          <th></th>
         </tr>
       </thead>
       <tbody id="keys-table-body">
       </tbody>
     </table>
 
-    <div class="output-box">
-      <label for="json-output">Copy this into your <code>keys.json</code> file:</label>
-      <textarea id="json-output" readonly></textarea>
-      <button class="copy-btn" id="btn-copy">Copy to Clipboard</button>
+    <div class="url-box">
+      <strong>Sheet URL:</strong>
+      <span style="color:#888;font-size:13px;display:block;margin-top:5px;">Open your Google Sheet to view and edit keys directly.</span>
     </div>
   </div>
 
   <script>
-    var currentKeys = {};
+    var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxQRgoIOUUJaJP0WKFaFFs4y4UVyhMh853GJPyO1CO4TDfag9H8cduAS_05ffrxLaxz/exec';
 
-    function fetchCurrentKeys() {
-      return fetch('keys.json?t=' + Date.now())
-        .then(function (res) {
-          if (!res.ok) throw new Error('Not found');
-          return res.json();
-        })
-        .then(function (data) {
-          currentKeys = data || {};
-        })
-        .catch(function () {
-          currentKeys = {};
-        });
+    function fetchKeys() {
+      return fetch(SCRIPT_URL + '?action=list_keys&t=' + Date.now())
+        .then(function (r) { return r.json(); })
+        .then(function (d) { return d.keys || []; })
+        .catch(function () { return []; });
     }
 
     function renderTable() {
       var tbody = document.getElementById('keys-table-body');
       var status = document.getElementById('keys-status');
       tbody.innerHTML = '';
-      var hasKeys = false;
+      status.textContent = 'Loading keys...';
 
-      for (var key in currentKeys) {
-        if (!currentKeys.hasOwnProperty(key)) continue;
-        hasKeys = true;
-        var duration = currentKeys[key];
-        if (typeof duration === 'object' && duration !== null) {
-          duration = duration.duration || duration.days || 30;
+      fetchKeys().then(function (keys) {
+        if (keys.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="6" style="color:#888;text-align:center;">No keys yet.</td></tr>';
+          status.textContent = 'No keys found.';
+          return;
         }
 
-        var tr = document.createElement('tr');
+        keys.forEach(function (k) {
+          var tr = document.createElement('tr');
 
-        var tdKey = document.createElement('td');
-        tdKey.textContent = key;
-        tr.appendChild(tdKey);
+          var tdKey = document.createElement('td');
+          tdKey.textContent = k.key;
+          tr.appendChild(tdKey);
 
-        var tdDuration = document.createElement('td');
-        tdDuration.textContent = duration + ' days (starts on first use)';
-        tr.appendChild(tdDuration);
+          var tdDur = document.createElement('td');
+          tdDur.textContent = k.durationDays + ' days';
+          tr.appendChild(tdDur);
 
-        tbody.appendChild(tr);
-      }
+          var tdStatus = document.createElement('td');
+          var statusClass = 'status-' + k.status;
+          tdStatus.className = statusClass;
+          tdStatus.textContent = k.status.replace(/_/g, ' ');
+          tr.appendChild(tdStatus);
 
-      if (!hasKeys) {
-        var tr = document.createElement('tr');
-        var td = document.createElement('td');
-        td.colSpan = 2;
-        td.textContent = 'No keys yet. Generate one above.';
-        td.style.color = '#888';
-        tr.appendChild(td);
-        tbody.appendChild(tr);
-      }
+          var tdDays = document.createElement('td');
+          if (k.daysRemaining !== null) {
+            tdDays.textContent = k.daysRemaining + ' days';
+          } else {
+            tdDays.textContent = '-';
+            tdDays.style.color = '#666';
+          }
+          tr.appendChild(tdDays);
 
-      status.textContent = 'Loaded from keys.json';
-      updateOutput();
-    }
+          var tdNotes = document.createElement('td');
+          tdNotes.textContent = k.notes || '-';
+          tdNotes.style.color = k.notes ? '#fff' : '#666';
+          tr.appendChild(tdNotes);
 
-    function updateOutput() {
-      document.getElementById('json-output').value = JSON.stringify(currentKeys, null, 2);
+          var tdDel = document.createElement('td');
+          var delBtn = document.createElement('button');
+          delBtn.className = 'delete-btn';
+          delBtn.textContent = 'Delete';
+          delBtn.addEventListener('click', function () {
+            if (!confirm('Delete key "' + k.key + '"?')) return;
+            delBtn.disabled = true;
+            delBtn.textContent = '...';
+            fetch(SCRIPT_URL, {
+              method: 'POST',
+              body: JSON.stringify({ action: 'delete_key', key: k.key })
+            }).then(function (r) { return r.json(); }).then(function (res) {
+              if (res.success) renderTable();
+              else alert('Failed to delete: ' + (res.error || 'unknown error'));
+            }).catch(function () {
+              alert('Network error');
+              delBtn.disabled = false;
+              delBtn.textContent = 'Delete';
+            });
+          });
+          tdDel.appendChild(delBtn);
+          tr.appendChild(tdDel);
+
+          tbody.appendChild(tr);
+        });
+
+        status.textContent = keys.length + ' key(s) loaded.';
+      }).catch(function () {
+        tbody.innerHTML = '<tr><td colspan="6" style="color:#ff4d4d;text-align:center;">Failed to load keys.</td></tr>';
+        status.textContent = 'Error loading keys.';
+      });
     }
 
     document.getElementById('btn-generate').addEventListener('click', function () {
       var keyName = document.getElementById('new-key-name').value.trim();
       var days = parseInt(document.getElementById('key-duration').value, 10) || 30;
+      var statusEl = document.getElementById('add-status');
 
       if (!keyName) {
-        alert('Please enter a key name.');
+        statusEl.className = 'error-msg';
+        statusEl.textContent = 'Please enter a key name.';
         return;
       }
 
-      if (currentKeys[keyName]) {
-        if (!confirm('Key "' + keyName + '" already exists. Replace it?')) return;
-      }
-
-      currentKeys[keyName] = days;
-
-      document.getElementById('new-key-name').value = '';
-      renderTable();
-    });
-
-    document.getElementById('btn-copy').addEventListener('click', function () {
-      var textarea = document.getElementById('json-output');
-      textarea.select();
-      document.execCommand('copy');
-      this.textContent = 'Copied!';
       var btn = this;
-      setTimeout(function () { btn.textContent = 'Copy to Clipboard'; }, 2000);
+      btn.disabled = true;
+      btn.textContent = 'Adding...';
+      statusEl.textContent = '';
+
+      fetch(SCRIPT_URL, {
+        method: 'POST',
+        body: JSON.stringify({ action: 'add_key', key: keyName, duration: days })
+      }).then(function (r) { return r.json(); }).then(function (res) {
+        btn.disabled = false;
+        btn.textContent = 'Add Key';
+        if (res.success) {
+          document.getElementById('new-key-name').value = '';
+          statusEl.className = 'success-msg';
+          statusEl.textContent = 'Key "' + keyName + '" added successfully.';
+          renderTable();
+        } else {
+          statusEl.className = 'error-msg';
+          statusEl.textContent = res.error || 'Failed to add key.';
+        }
+      }).catch(function () {
+        btn.disabled = false;
+        btn.textContent = 'Add Key';
+        statusEl.className = 'error-msg';
+        statusEl.textContent = 'Network error.';
+      });
     });
 
-    fetchCurrentKeys().then(function () {
-      renderTable();
-    });
+    renderTable();
   </script>
 </body>
 </html>

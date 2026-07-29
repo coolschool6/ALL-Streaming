@@ -1,29 +1,11 @@
 (function () {
   'use strict';
 
-  // ===== MANUAL KEY PAYWALL SYSTEM (SHARED JSON) =====
-  // keys.json format: { "KEY_NAME": durationInDays }
-  // localStorage saves the user's personal expiry after first activation
+  // ===== GOOGLE SHEETS PAYWALL SYSTEM =====
+  // Keys stored in Google Sheet, accessed via Apps Script web app
+  // localStorage caches the expiry for instant offline check
 
-  var cachedKeys = {};
-
-  function fetchKeys() {
-    return fetch('keys.json?t=' + Date.now())
-      .then(function (res) {
-        if (!res.ok) throw new Error('Failed to load keys');
-        return res.json();
-      })
-      .then(function (data) {
-        cachedKeys = data || {};
-      })
-      .catch(function () {
-        cachedKeys = {};
-      });
-  }
-
-  function getActiveKeys() {
-    return cachedKeys;
-  }
+  var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxQRgoIOUUJaJP0WKFaFFs4y4UVyhMh853GJPyO1CO4TDfag9H8cduAS_05ffrxLaxz/exec';
 
   function checkPaywall() {
     var overlay = document.getElementById('paywall-overlay');
@@ -31,16 +13,10 @@
     var daysLeftEl = document.getElementById('sub-days-left');
     if (!overlay) return;
 
-    var savedKey = localStorage.getItem('asfr_access_key');
     var expiryTime = localStorage.getItem('asfr_expiry_time');
     var now = Date.now();
-    var validKeys = getActiveKeys();
 
-    // Key must exist in keys.json AND personal expiry must not have passed
-    var keyExists = savedKey && validKeys[savedKey] !== undefined;
-    var notExpired = expiryTime && now < parseInt(expiryTime, 10);
-
-    if (keyExists && notExpired) {
+    if (expiryTime && now < parseInt(expiryTime, 10)) {
       overlay.style.display = 'none';
       if (badge && daysLeftEl) {
         var timeLeftMs = parseInt(expiryTime, 10) - now;
@@ -56,6 +32,59 @@
     }
   }
 
+  function verifyOrActivateKey(keyValue) {
+    return fetch(SCRIPT_URL + '?action=verify&key=' + encodeURIComponent(keyValue))
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        if (data.status === 'ready_to_activate') {
+          return fetch(SCRIPT_URL + '?action=activate&key=' + encodeURIComponent(keyValue))
+            .then(function (res) { return res.json(); })
+            .then(function (actData) {
+              if (actData.status === 'activated' || actData.status === 'already_activated') {
+                localStorage.setItem('asfr_access_key', keyValue);
+                localStorage.setItem('asfr_expiry_time', actData.expiresAt.toString());
+                return { success: true, expiresAt: actData.expiresAt };
+              }
+              return { success: false, error: 'Activation failed' };
+            });
+        } else if (data.status === 'active') {
+          localStorage.setItem('asfr_access_key', keyValue);
+          localStorage.setItem('asfr_expiry_time', data.expiresAt.toString());
+          return { success: true, expiresAt: data.expiresAt, daysRemaining: data.daysRemaining };
+        } else if (data.status === 'expired') {
+          return { success: false, error: 'This key has expired.' };
+        } else {
+          return { success: false, error: 'Invalid key.' };
+        }
+      });
+  }
+
+  function backgroundVerifyKey() {
+    var savedKey = localStorage.getItem('asfr_access_key');
+    var expiryTime = localStorage.getItem('asfr_expiry_time');
+    if (!savedKey || !expiryTime) return;
+
+    var lastCheck = localStorage.getItem('asfr_last_verify');
+    var now = Date.now();
+    if (lastCheck && (now - parseInt(lastCheck, 10)) < 86400000) return;
+
+    fetch(SCRIPT_URL + '?action=verify&key=' + encodeURIComponent(savedKey))
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        if (data.status === 'expired' || data.status === 'invalid') {
+          localStorage.removeItem('asfr_access_key');
+          localStorage.removeItem('asfr_expiry_time');
+          localStorage.removeItem('asfr_last_verify');
+          checkPaywall();
+        } else if (data.status === 'active') {
+          localStorage.setItem('asfr_expiry_time', data.expiresAt.toString());
+          localStorage.setItem('asfr_last_verify', now.toString());
+          checkPaywall();
+        }
+      })
+      .catch(function () {});
+  }
+
   function setupPaywallEvents() {
     var activateBtn = document.getElementById('btn-activate');
     var keyInput = document.getElementById('key-input');
@@ -65,44 +94,49 @@
 
     activateBtn.addEventListener('click', function () {
       var enteredKey = keyInput.value.trim();
-      var validKeys = getActiveKeys();
-      
-      if (validKeys[enteredKey] !== undefined) {
-        var durationDays = validKeys[enteredKey];
-        if (typeof durationDays === 'object' && durationDays !== null) {
-          durationDays = durationDays.duration || durationDays.days || 30;
-        }
-        durationDays = parseInt(durationDays, 10) || 30;
-
-        // Calculate personal expiry from NOW (countdown starts on first use)
-        var expiry = Date.now() + (durationDays * 24 * 60 * 60 * 1000);
-
-        localStorage.setItem('asfr_access_key', enteredKey);
-        localStorage.setItem('asfr_expiry_time', expiry.toString());
-        
-        document.getElementById('paywall-overlay').style.display = 'none';
-        alert('Access granted! You have ' + durationDays + ' days.');
-        window.location.reload();
-      } else {
-        errorMsg.textContent = 'Invalid key. Contact WhatsApp to purchase a valid key.';
+      if (!enteredKey) {
+        errorMsg.textContent = 'Please enter a key.';
+        return;
       }
+
+      var btn = activateBtn;
+      btn.disabled = true;
+      btn.textContent = 'Verifying...';
+      errorMsg.textContent = '';
+
+      verifyOrActivateKey(enteredKey).then(function (result) {
+        btn.disabled = false;
+        btn.textContent = 'Activate';
+
+        if (result.success) {
+          document.getElementById('paywall-overlay').style.display = 'none';
+          var daysLeft = result.daysRemaining || Math.ceil((result.expiresAt - Date.now()) / 86400000);
+          alert('Access granted! You have ' + daysLeft + ' day(s) remaining.');
+          window.location.reload();
+        } else {
+          errorMsg.textContent = result.error + ' Contact WhatsApp to purchase a valid key.';
+        }
+      }).catch(function () {
+        btn.disabled = false;
+        btn.textContent = 'Activate';
+        errorMsg.textContent = 'Network error. Check your connection.';
+      });
     });
   }
 
   window.addEventListener('DOMContentLoaded', function () {
-    fetchKeys().then(function () {
-      checkPaywall();
-      setupPaywallEvents();
+    checkPaywall();
+    backgroundVerifyKey();
+    setupPaywallEvents();
 
-      var logoutBtn = document.getElementById('btn-logout');
-      if (logoutBtn) {
-        logoutBtn.addEventListener('click', function () {
-          localStorage.removeItem('asfr_access_key');
-          localStorage.removeItem('asfr_expiry_time');
-          window.location.reload();
-        });
-      }
-    });
+    var logoutBtn = document.getElementById('btn-logout');
+    if (logoutBtn) {
+      logoutBtn.addEventListener('click', function () {
+        localStorage.removeItem('asfr_access_key');
+        localStorage.removeItem('asfr_expiry_time');
+        window.location.reload();
+      });
+    }
   });
 
 
@@ -706,6 +740,16 @@
     var server = SERVERS[serverIndex] || SERVERS[0];
     if (serverSelect) serverSelect.value = serverIndex.toString();
     playerIframe.src = buildEmbedURL(server, type, item.id, sNum, eNum);
+    showOverlay();
+  }
+
+  function showOverlay() {
+    var overlay = document.getElementById('player-overlay');
+    if (!overlay) return;
+    overlay.classList.add('active');
+    setTimeout(function () {
+      overlay.classList.remove('active');
+    }, 1500);
   }
 
   function closePlayer() {

@@ -778,6 +778,17 @@ img {
   box-shadow: 0 0 60px rgba(229, 9, 20, 0.08), 0 0 120px rgba(0,0,0,0.5);
 }
 
+#player-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: none;
+}
+
+#player-overlay.active {
+  display: block;
+}
+
 /* ===== DETAIL MODAL ===== */
 .detail-modal {
   position: fixed;
