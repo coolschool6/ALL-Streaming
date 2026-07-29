@@ -30,6 +30,7 @@
       overlay.style.display = 'flex';
       if (badge) badge.style.display = 'none';
     }
+    document.documentElement.style.display = '';
   }
 
   function verifyOrActivateKey(keyValue) {
@@ -192,8 +193,6 @@
   var currentFilter = 'all';
   var searchTimeout = null;
   var currentMedia = null;
-
-  window.open = function () { return { focus: function () {}, blur: function () {}, close: function () {} }; };
 
   function initServerSelector() {
     if (document.getElementById('server-select')) {

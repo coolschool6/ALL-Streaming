@@ -9,6 +9,14 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Grenze+Gotisch:wght@400;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
+  <script>
+    (function(){
+      var et = localStorage.getItem('asfr_expiry_time');
+      if (!et || Date.now() >= parseInt(et, 10)) {
+        document.documentElement.style.display = 'none';
+      }
+    })();
+  </script>
 </head>
 <body>
 
@@ -146,7 +154,7 @@
   <div id="paywall-overlay" class="paywall-modal" style="display: none;">
     <div class="paywall-content">
       <h2>🔒 ALLStreaming Access</h2>
-      <p>This service costs <strong>100 TTD / month</strong>.</p>
+      <p>This service costs <strong>200 TTD / month</strong>.</p>
       <p class="paywall-instructions">
         Pay via bank transfer and send your receipt on WhatsApp to receive your 30-day key.
       </p>
@@ -154,7 +162,7 @@
       <input type="text" id="key-input" placeholder="Enter your 30-day key..." autocomplete="off" />
       <button id="btn-activate" class="btn-watch" style="width:100%; margin-bottom: 12px;">Activate Key</button>
       
-      <a href="https://wa.me/18683925275?text=Hi,%20I%20want%20to%20buy%20a%2030-day%20access%20key%20for%20ALLStreaming%20(100%20TTD).%20Here%20is%20my%20bank%20transfer%20receipt:" 
+      <a href="https://wa.me/18683925275?text=Hi,%20I%20want%20to%20buy%20a%2030-day%20access%20key%20for%20ALLStreaming%20(200%20TTD).%20Here%20is%20my%20bank%20transfer%20receipt:" 
          target="_blank" 
          class="whatsapp-btn">
          💬 Buy via WhatsApp (Bank Transfer)
