@@ -12,6 +12,8 @@ function doGet(e) {
     result = activateKey(sheet, data, key);
   } else if (action === 'list_keys') {
     result = listKeys(data);
+  } else if (action === 'fetch_url') {
+    result = fetchUrl(params.url);
   } else {
     result = { error: 'Invalid action' };
   }
@@ -160,6 +162,22 @@ function listKeys(data) {
 /* Run this once from the Apps Script editor to convert
    existing raw millisecond numbers to readable dates.
    Select "migrateDates" in the function dropdown and click Run. */
+function fetchUrl(url) {
+  if (!url) return { error: 'Missing url' };
+  try {
+    var response = UrlFetchApp.fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      muteHttpExceptions: true,
+      followRedirects: true
+    });
+    var content = response.getContentText();
+    var contentType = response.getHeaders()['Content-Type'] || '';
+    return { content: content, contentType: contentType, status: response.getResponseCode() };
+  } catch (e) {
+    return { error: e.toString() };
+  }
+}
+
 function migrateDates() {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   var data = sheet.getDataRange().getValues();

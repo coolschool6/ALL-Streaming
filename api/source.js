@@ -1,3 +1,26 @@
+var GAS_URL = 'https://script.google.com/macros/s/AKfycbwLLoqYeMjV3eERrQ5NXJyJmr4ZhWHwJqwcbOVuF5yy_lwHy77leaFbDrS9GyWt-5pp/exec';
+
+function gasFetch(url) {
+  return fetch(GAS_URL + '?action=fetch_url&url=' + encodeURIComponent(url))
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (d.error) throw new Error(d.error);
+      return d;
+    });
+}
+
+async function smartFetch(url) {
+  var direct = await fetch(url, {
+    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+  });
+  var text = await direct.text();
+  if (text.includes('Just a moment') || text.includes('challenges.cloudflare')) {
+    var viaGas = await gasFetch(url);
+    return viaGas.content;
+  }
+  return text;
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -19,33 +42,32 @@ export default async function handler(req, res) {
       ? 'https://play.xpass.top/e/tv/' + tmdbId + '/' + season + '/' + episode + '?autostart=true'
       : 'https://play.xpass.top/e/movie/' + tmdbId + '?autostart=true';
 
-    var htmlRes = await fetch(xpassUrl, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-    });
-    var html = await htmlRes.text();
+    var html = await smartFetch(xpassUrl);
 
     var match = html.match(/"playlist":"([^"]+)"/);
     if (!match) {
-      var snippet = html.substring(0, 1000);
-      return res.status(404).json({ error: 'No playlist found in xpass page', snippet: snippet, length: html.length });
+      return res.status(404).json({ error: 'No playlist found in xpass page' });
     }
 
     var playlistUrl = 'https://play.xpass.top' + match[1];
 
-    var plRes = await fetch(playlistUrl, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-    });
-    var plData = await plRes.json();
+    var plText = await smartFetch(playlistUrl);
+    var plData = JSON.parse(plText);
 
     var m3u8Url = plData.playlist?.[0]?.sources?.[0]?.file;
     if (!m3u8Url) {
       return res.status(404).json({ error: 'No m3u8 URL in playlist' });
     }
 
-    var m3u8Res = await fetch(m3u8Url, {
+    var m3u8Content;
+    var m3u8Direct = await fetch(m3u8Url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
     });
-    var m3u8Content = await m3u8Res.text();
+    m3u8Content = await m3u8Direct.text();
+    if (m3u8Content.includes('Just a moment')) {
+      var m3u8ViaGas = await gasFetch(m3u8Url);
+      m3u8Content = m3u8ViaGas.content;
+    }
 
     var baseUrl = m3u8Url.substring(0, m3u8Url.lastIndexOf('/') + 1);
     var lines = m3u8Content.split('\n');
