@@ -743,19 +743,36 @@
     showOverlay();
   }
 
+  var overlayTimer = null;
+
   function showOverlay() {
     var overlay = document.getElementById('player-overlay');
+    var btn = document.getElementById('overlay-unlock');
     if (!overlay) return;
+    if (overlayTimer) clearTimeout(overlayTimer);
     overlay.classList.add('active');
-    setTimeout(function () {
+    if (btn) btn.style.display = '';
+  }
+
+  function setupOverlayUnlock() {
+    var btn = document.getElementById('overlay-unlock');
+    var overlay = document.getElementById('player-overlay');
+    if (!btn || !overlay) return;
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
       overlay.classList.remove('active');
-    }, 1500);
+      if (overlayTimer) clearTimeout(overlayTimer);
+      overlayTimer = setTimeout(function () {
+        overlay.classList.add('active');
+      }, 30000);
+    });
   }
 
   function closePlayer() {
     playerIframe.src = 'about:blank';
     playerModal.classList.remove('active');
     document.body.style.overflow = '';
+    if (overlayTimer) clearTimeout(overlayTimer);
   }
 
   function setupTVControls(tvId) {
@@ -866,6 +883,7 @@
     seasonSelect.addEventListener('change', function () { if (currentMedia) updateEpisodes(currentMedia.item.id, this.value); });
     episodeSelect.addEventListener('change', function () { if (currentMedia) loadServer(serverSelect ? parseInt(serverSelect.value, 10) : 0); });
     playerClose.addEventListener('click', closePlayer);
+    setupOverlayUnlock();
     searchToggle.addEventListener('click', toggleSearch);
     searchInput.addEventListener('input', handleSearch);
     if (searchClose) searchClose.addEventListener('click', toggleSearch);

@@ -783,10 +783,33 @@ img {
   inset: 0;
   z-index: 10;
   display: none;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 20px;
 }
 
 #player-overlay.active {
-  display: block;
+  display: flex;
+}
+
+.overlay-btn {
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  padding: 10px 24px;
+  border-radius: 24px;
+  font-size: 14px;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  transition: opacity 0.2s;
+  min-height: 44px;
+  min-width: 44px;
+  pointer-events: auto;
+  z-index: 11;
+}
+
+.overlay-btn:active {
+  opacity: 0.6;
 }
 
 /* ===== DETAIL MODAL ===== */
