@@ -193,6 +193,9 @@
   var currentFilter = 'all';
   var searchTimeout = null;
   var currentMedia = null;
+  var hlsInstance = null;
+  var plyrInstance = null;
+  var customActive = false;
 
   function initServerSelector() {
     if (document.getElementById('server-select')) {
@@ -712,6 +715,73 @@
     return server.tv + id + '/' + season + '/' + episode;
   }
 
+  function initCustomPlayer(sourceUrl) {
+    var video = document.getElementById('hls-video');
+    var iframe = document.getElementById('player-iframe');
+    if (!video || !iframe) return;
+
+    destroyCustomPlayer();
+
+    customActive = true;
+    iframe.style.display = 'none';
+    video.style.display = 'block';
+    video.removeAttribute('src');
+
+    if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+      hlsInstance = new Hls();
+      hlsInstance.loadSource(sourceUrl);
+      hlsInstance.attachMedia(video);
+      hlsInstance.on(Hls.Events.MANIFEST_PARSED, function () {
+        if (typeof Plyr !== 'undefined') {
+          plyrInstance = new Plyr(video, {
+            controls: ['play-large', 'play', 'progress', 'current-time', 'duration', 'mute', 'volume', 'fullscreen', 'settings'],
+            settings: ['quality', 'speed'],
+            speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 2] }
+          });
+        }
+        video.play().catch(function () {});
+      });
+      hlsInstance.on(Hls.Events.ERROR, function (e, data) {
+        if (data.fatal) {
+          destroyCustomPlayer();
+          loadServer(1);
+        }
+      });
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = sourceUrl;
+      if (typeof Plyr !== 'undefined') plyrInstance = new Plyr(video);
+    } else {
+      customActive = false;
+      iframe.style.display = 'block';
+      video.style.display = 'none';
+    }
+  }
+
+  function destroyCustomPlayer() {
+    customActive = false;
+    if (hlsInstance) { try { hlsInstance.destroy(); } catch (e) {} hlsInstance = null; }
+    if (plyrInstance) { try { plyrInstance.destroy(); } catch (e) {} plyrInstance = null; }
+    var video = document.getElementById('hls-video');
+    var iframe = document.getElementById('player-iframe');
+    if (video) { video.style.display = 'none'; video.removeAttribute('src'); }
+    if (iframe) { iframe.style.display = 'block'; }
+  }
+
+  function attemptCustomPlayer() {
+    if (!currentMedia) return;
+    var item = currentMedia.item;
+    var type = currentMedia.type;
+    var sNum = seasonSelect ? seasonSelect.value || 1 : 1;
+    var eNum = episodeSelect ? episodeSelect.value || 1 : 1;
+    var url = '/api/source?tmdbId=' + item.id + '&type=' + type;
+    if (type === 'tv') url += '&season=' + sNum + '&episode=' + eNum;
+
+    fetch(url).then(function (r) {
+      if (!r.ok) throw new Error('Custom source not available');
+      initCustomPlayer(url);
+    }).catch(function () {});
+  }
+
   function openPlayer(item, mediaType) {
     initServerSelector();
     currentMedia = { item: item, type: mediaType };
@@ -725,6 +795,7 @@
     } else {
       tvControls.style.display = 'none';
       loadServer(0);
+      attemptCustomPlayer();
     }
     playerModal.classList.add('active');
     document.body.style.overflow = 'hidden';
@@ -732,6 +803,7 @@
 
   function loadServer(serverIndex) {
     if (!currentMedia) return;
+    if (serverIndex !== 0) destroyCustomPlayer();
     var item = currentMedia.item;
     var type = currentMedia.type;
     var sNum = seasonSelect.value || 1;
@@ -752,6 +824,7 @@
   }
 
   function closePlayer() {
+    destroyCustomPlayer();
     playerIframe.src = 'about:blank';
     playerModal.classList.remove('active');
     document.body.style.overflow = '';
@@ -784,6 +857,7 @@
         episodeSelect.appendChild(opt);
       });
       loadServer(0);
+      attemptCustomPlayer();
     });
   }
 
@@ -863,7 +937,12 @@
     loadContent();
 
     seasonSelect.addEventListener('change', function () { if (currentMedia) updateEpisodes(currentMedia.item.id, this.value); });
-    episodeSelect.addEventListener('change', function () { if (currentMedia) loadServer(serverSelect ? parseInt(serverSelect.value, 10) : 0); });
+    episodeSelect.addEventListener('change', function () {
+      if (currentMedia) {
+        loadServer(serverSelect ? parseInt(serverSelect.value, 10) : 0);
+        attemptCustomPlayer();
+      }
+    });
     playerClose.addEventListener('click', closePlayer);
     searchToggle.addEventListener('click', toggleSearch);
     searchInput.addEventListener('input', handleSearch);

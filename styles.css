@@ -768,7 +768,8 @@ img {
   padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
 }
 
-.player-wrap iframe {
+.player-wrap iframe,
+.player-wrap .hls-video {
   width: 100%;
   max-width: 1200px;
   aspect-ratio: 16 / 9;
@@ -776,6 +777,14 @@ img {
   border-radius: 12px;
   background: #000;
   box-shadow: 0 0 60px rgba(229, 9, 20, 0.08), 0 0 120px rgba(0,0,0,0.5);
+}
+
+.hls-video {
+  outline: none;
+}
+
+.hls-video::-webkit-media-controls-panel {
+  background: linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.7) 100%);
 }
 
 #player-overlay {
@@ -1764,7 +1773,8 @@ img {
     padding-bottom: calc(4px + env(safe-area-inset-bottom, 0px));
   }
 
-  .player-wrap iframe {
+  .player-wrap iframe,
+  .player-wrap .hls-video {
     border-radius: 6px;
   }
 
