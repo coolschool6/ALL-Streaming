@@ -14,6 +14,8 @@ function doGet(e) {
     result = listKeys(data);
   } else if (action === 'fetch_url') {
     result = fetchUrl(params.url);
+  } else if (action === 'fetch_binary') {
+    result = fetchBinary(params.url);
   } else {
     result = { error: 'Invalid action' };
   }
@@ -173,6 +175,24 @@ function fetchUrl(url) {
     var content = response.getContentText();
     var contentType = response.getHeaders()['Content-Type'] || '';
     return { content: content, contentType: contentType, status: response.getResponseCode() };
+  } catch (e) {
+    return { error: e.toString() };
+  }
+}
+
+function fetchBinary(url) {
+  if (!url) return { error: 'Missing url' };
+  try {
+    var response = UrlFetchApp.fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      muteHttpExceptions: true,
+      followRedirects: true
+    });
+    var blob = response.getBlob();
+    var bytes = blob.getBytes();
+    var b64 = Utilities.base64Encode(bytes);
+    var contentType = response.getHeaders()['Content-Type'] || '';
+    return { content: b64, contentType: contentType, status: response.getResponseCode(), encoding: 'base64' };
   } catch (e) {
     return { error: e.toString() };
   }
