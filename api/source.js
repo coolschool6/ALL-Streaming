@@ -11,7 +11,7 @@ function gasFetch(url) {
 
 async function smartFetch(url) {
   var controller = new AbortController();
-  var id = setTimeout(function () { controller.abort(); }, 5000);
+  var id = setTimeout(function () { controller.abort(); }, 3000);
   try {
     var direct = await fetch(url, {
       signal: controller.signal,
@@ -76,14 +76,14 @@ function rewriteM3u8(content, sourceUrl) {
 }
 
 async function fetchM3u8Content(m3u8Url) {
-  var output = await fetchWithTimeout(m3u8Url, 4000);
+  var output = await fetchWithTimeout(m3u8Url, 3000);
   if (!output) return null;
   var resolvedUrl = m3u8Url;
   var depth = 0;
   while (output.indexOf('#EXTM3U') === -1 && depth < 3) {
     var bareUrl = output.trim();
     if (!isUrl(bareUrl)) break;
-    output = await fetchWithTimeout(bareUrl, 4000);
+    output = await fetchWithTimeout(bareUrl, 3000);
     if (!output) break;
     resolvedUrl = bareUrl;
     depth++;
@@ -100,7 +100,7 @@ async function fetchM3u8Content(m3u8Url) {
 
 async function tryGetM3u8FromPlaylist(playlistUrl) {
   try {
-    var plText = await fetchWithTimeout(playlistUrl, 4000);
+    var plText = await fetchWithTimeout(playlistUrl, 3000);
     if (!plText) return null;
     var plData = JSON.parse(plText);
     var sources = plData.playlist?.[0]?.sources || [];
@@ -144,35 +144,48 @@ export default async function handler(req, res) {
       return res.status(404).json({ error: 'No playlist found in xpass page' });
     }
 
-    var playlistUrls = ['https://play.xpass.top' + match[1]];
+    var primaryPlaylistUrl = 'https://play.xpass.top' + match[1];
 
+    var backupPlaylistUrls = [];
     var backupRegex = /"url":"([^"]+)"/g;
     var bMatch;
     while ((bMatch = backupRegex.exec(html)) !== null) {
       var url = bMatch[1];
       if (url.indexOf('/playlist.json') !== -1 && url.indexOf('/mdata/') !== -1) {
-        playlistUrls.push('https://play.xpass.top' + url);
+        backupPlaylistUrls.push('https://play.xpass.top' + url);
       }
     }
 
-    playlistUrls = playlistUrls.filter(function (u, i) { return playlistUrls.indexOf(u) === i; });
+    var primaryM3u8 = await tryGetM3u8FromPlaylist(primaryPlaylistUrl);
+    var result = null;
 
-    var m3u8Candidates = await Promise.all(playlistUrls.map(tryGetM3u8FromPlaylist));
-    var m3u8Urls = m3u8Candidates.filter(Boolean);
-
-    if (m3u8Urls.length === 0) {
-      return res.status(200).send('// stream-unavailable');
+    if (primaryM3u8) {
+      result = await fetchM3u8Content(primaryM3u8);
+      if (result) {
+        res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+        res.setHeader('Cache-Control', 'public, s-maxage=30, max-age=0');
+        res.setHeader('X-Source', 'vip.1x2.space');
+        return res.status(200).send(result);
+      }
     }
 
-    m3u8Urls = m3u8Urls.filter(function (u, i) { return m3u8Urls.indexOf(u) === i; });
-
-    var results = await Promise.all(m3u8Urls.map(fetchM3u8Content));
-    var valid = results.filter(Boolean);
-
-    if (valid.length > 0) {
-      res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
-      res.setHeader('Cache-Control', 'public, s-maxage=30, max-age=0');
-      return res.status(200).send(valid[0]);
+    var backupM3u8Candidates = await Promise.all(backupPlaylistUrls.map(tryGetM3u8FromPlaylist));
+    var backupM3u8Urls = backupM3u8Candidates.filter(Boolean);
+    if (backupM3u8Urls.length > 0) {
+      backupM3u8Urls = backupM3u8Urls.filter(function (u, i) { return backupM3u8Urls.indexOf(u) === i; });
+      var backupResults = await Promise.all(backupM3u8Urls.map(fetchM3u8Content));
+      var validBackups = backupResults.filter(Boolean);
+      if (validBackups.length > 0) {
+        var sourceLabel = 'backup-cdn';
+        try {
+          var domainMatch = backupM3u8Urls[0].match(/https?:\/\/([^\/]+)/);
+          if (domainMatch) sourceLabel = domainMatch[1];
+        } catch (e) {}
+        res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+        res.setHeader('Cache-Control', 'public, s-maxage=30, max-age=0');
+        res.setHeader('X-Source', sourceLabel);
+        return res.status(200).send(validBackups[0]);
+      }
     }
 
     return res.status(200).send('// stream-unavailable');

@@ -717,9 +717,10 @@
     return server.tv + id + '/' + season + '/' + episode;
   }
 
-  function initCustomPlayer(sourceUrl) {
+  function initCustomPlayer(sourceUrl, sourceName) {
     var video = document.getElementById('hls-video');
     var iframe = document.getElementById('player-iframe');
+    var label = document.getElementById('source-label');
     if (!video || !iframe) return;
 
     destroyCustomPlayer();
@@ -729,6 +730,7 @@
     iframe.style.display = 'none';
     video.style.display = 'block';
     video.removeAttribute('src');
+    if (label) { label.textContent = sourceName || ''; label.style.display = sourceName ? 'block' : 'none'; }
 
     var isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) && /AppleWebKit/.test(navigator.userAgent);
 
@@ -789,8 +791,10 @@
     if (plyrInstance) { try { plyrInstance.destroy(); } catch (e) {} plyrInstance = null; }
     var video = document.getElementById('hls-video');
     var iframe = document.getElementById('player-iframe');
+    var label = document.getElementById('source-label');
     if (video) { video.style.display = 'none'; video.removeAttribute('src'); }
     if (iframe) { iframe.style.display = 'block'; }
+    if (label) { label.style.display = 'none'; }
   }
 
   function setShield(show) {
@@ -813,6 +817,7 @@
   function clearSourceCache() {
     sourceCache.url = null;
     sourceCache.ready = false;
+    sourceCache.source = '';
   }
 
   function preFetchSource(item, type, season, episode) {
@@ -821,6 +826,7 @@
     if (type === 'tv' && season && episode) url += '&season=' + season + '&episode=' + episode;
     fetch(url).then(function (r) {
       if (!r.ok) throw new Error('status ' + r.status);
+      sourceCache.source = r.headers.get('X-Source') || '';
       return r.text();
     }).then(function (body) {
       if (body.indexOf('#EXTM3U') === -1) throw new Error('Not HLS');
@@ -839,7 +845,7 @@
     if (type === 'tv') url += '&season=' + sNum + '&episode=' + eNum;
 
     if (sourceCache.url === url && sourceCache.ready) {
-      initCustomPlayer(url);
+      initCustomPlayer(url, sourceCache.source);
       return;
     }
 
@@ -849,10 +855,11 @@
     fetch(url, { signal: controller.signal }).then(function (r) {
       clearTimeout(timeout);
       if (!r.ok) throw new Error('status ' + r.status);
-      return r.text();
-    }).then(function (body) {
-      if (body.indexOf('#EXTM3U') === -1) throw new Error('Not HLS');
-      initCustomPlayer(url);
+      var src = r.headers.get('X-Source') || '';
+      return r.text().then(function (body) {
+        if (body.indexOf('#EXTM3U') === -1) throw new Error('Not HLS');
+        initCustomPlayer(url, src);
+      });
     }).catch(function () {
       clearTimeout(timeout);
     });

@@ -846,6 +846,20 @@ img {
 
 
 
+.source-label {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 20;
+  background: rgba(0,0,0,0.75);
+  color: #0f0;
+  font-size: 11px;
+  font-family: monospace;
+  padding: 4px 10px;
+  border-radius: 4px;
+  pointer-events: none;
+}
+
 #player-overlay {
   position: absolute;
   inset: 0;
