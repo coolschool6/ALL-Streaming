@@ -42,7 +42,10 @@ export default async function handler(req, res) {
         var absUrl = trimmed.startsWith('http://') || trimmed.startsWith('https://')
           ? trimmed
           : new URL(trimmed, baseUrl).href;
-        return '/api/proxy?url=' + encodeURIComponent(absUrl);
+        if (absUrl.indexOf('.m3u8') !== -1) {
+          return '/api/proxy?url=' + encodeURIComponent(absUrl);
+        }
+        return absUrl;
       });
       res.setHeader('Content-Type', contentType || 'application/vnd.apple.mpegurl');
       res.setHeader('Cache-Control', 'no-cache');
