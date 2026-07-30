@@ -196,7 +196,7 @@
   var hlsInstance = null;
   var plyrInstance = null;
   var customActive = false;
-  var sourceCache = { url: null, content: null, blobUrl: null };
+  var sourceCache = { url: null, ready: false };
 
   function initServerSelector() {
     if (document.getElementById('server-select')) {
@@ -814,28 +814,22 @@
   }
 
   function clearSourceCache() {
-    if (sourceCache.blobUrl) { URL.revokeObjectURL(sourceCache.blobUrl); }
     sourceCache.url = null;
-    sourceCache.content = null;
-    sourceCache.blobUrl = null;
+    sourceCache.ready = false;
   }
 
   function preFetchSource(item, type) {
     clearSourceCache();
     if (type === 'tv') return;
     var url = '/api/source?tmdbId=' + item.id + '&type=' + type;
-    sourceCache.url = url;
     fetch(url).then(function (r) {
       if (!r.ok) throw new Error('status ' + r.status);
       return r.text();
     }).then(function (body) {
       if (body.indexOf('#EXTM3U') === -1) throw new Error('Not HLS');
-      sourceCache.content = body;
-      var blob = new Blob([body], { type: 'application/vnd.apple.mpegurl' });
-      sourceCache.blobUrl = URL.createObjectURL(blob);
-    }).catch(function () {
-      sourceCache.content = null;
-    });
+      sourceCache.url = url;
+      sourceCache.ready = true;
+    }).catch(function () {});
   }
 
   function attemptCustomPlayer() {
@@ -849,9 +843,9 @@
 
     showLoader(true, 'Connecting to stream...');
 
-    if (sourceCache.url === url && sourceCache.blobUrl) {
+    if (sourceCache.url === url && sourceCache.ready) {
       showLoader(true, 'Starting player...');
-      initCustomPlayer(sourceCache.blobUrl);
+      initCustomPlayer(url);
       return;
     }
 
@@ -864,10 +858,8 @@
       return r.text();
     }).then(function (body) {
       if (body.indexOf('#EXTM3U') === -1) throw new Error('Not HLS');
-      var blob = new Blob([body], { type: 'application/vnd.apple.mpegurl' });
-      var blobUrl = URL.createObjectURL(blob);
       showLoader(true, 'Starting player...');
-      initCustomPlayer(blobUrl);
+      initCustomPlayer(url);
     }).catch(function (err) {
       clearTimeout(timeout);
       if (err.name === 'AbortError') {
