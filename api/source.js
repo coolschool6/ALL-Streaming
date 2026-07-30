@@ -74,11 +74,7 @@ export default async function handler(req, res) {
         if (!t || t.startsWith('#')) { result.push(linesArr[k]); continue; }
         try {
           var absolute = isUrl(t) ? t : new URL(t, base).href;
-          if (absolute.indexOf('.m3u8') !== -1) {
-            result.push('/api/proxy?url=' + encodeURIComponent(absolute));
-          } else {
-            result.push(absolute);
-          }
+          result.push('/api/proxy?url=' + encodeURIComponent(absolute));
         } catch (e) {
           result.push(linesArr[k]);
         }
@@ -116,12 +112,7 @@ export default async function handler(req, res) {
       output = rewriteM3u8(output, resolvedUrl);
     } else if (isUrl(output.trim())) {
       var singleUrl = output.trim();
-      if (singleUrl.indexOf('.m3u8') !== -1) {
-        var single = '/api/proxy?url=' + encodeURIComponent(singleUrl);
-        output = '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=2560000,RESOLUTION=1920x1080\n' + single;
-      } else {
-        output = '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=2560000,RESOLUTION=1920x1080\n' + singleUrl;
-      }
+      output = '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=2560000,RESOLUTION=1920x1080\n/api/proxy?url=' + encodeURIComponent(singleUrl);
     }
 
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
