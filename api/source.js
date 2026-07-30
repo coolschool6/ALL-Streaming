@@ -10,15 +10,110 @@ function gasFetch(url) {
 }
 
 async function smartFetch(url) {
-  var direct = await fetch(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-  });
-  var text = await direct.text();
-  if (text.includes('Just a moment') || text.includes('challenges.cloudflare')) {
+  var controller = new AbortController();
+  var id = setTimeout(function () { controller.abort(); }, 5000);
+  try {
+    var direct = await fetch(url, {
+      signal: controller.signal,
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+    });
+    var text = await direct.text();
+    if (text.includes('Just a moment') || text.includes('challenges.cloudflare')) {
+      var viaGas = await gasFetch(url);
+      return viaGas.content;
+    }
+    return text;
+  } catch (e) {
     var viaGas = await gasFetch(url);
     return viaGas.content;
+  } finally {
+    clearTimeout(id);
   }
-  return text;
+}
+
+function isUrl(s) {
+  return s && (s.startsWith('http://') || s.startsWith('https://'));
+}
+
+async function fetchWithTimeout(url, ms) {
+  var controller = new AbortController();
+  var id = setTimeout(function () { controller.abort(); }, ms);
+  try {
+    var r = await fetch(url, {
+      signal: controller.signal,
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+    });
+    var t = await r.text();
+    if (t.includes('Just a moment') || t.includes('challenges.cloudflare')) {
+      var g = await gasFetch(url);
+      return g.content || '';
+    }
+    return t;
+  } catch (e) {
+    return '';
+  } finally {
+    clearTimeout(id);
+  }
+}
+
+function rewriteM3u8(content, sourceUrl) {
+  if (!sourceUrl || !isUrl(sourceUrl)) return content;
+  var base = sourceUrl.substring(0, sourceUrl.lastIndexOf('/') + 1);
+  if (!isUrl(base)) return content;
+  var linesArr = content.split('\n');
+  var result = [];
+  for (var k = 0; k < linesArr.length; k++) {
+    var t = linesArr[k].trim();
+    if (!t || t.startsWith('#')) { result.push(linesArr[k]); continue; }
+    try {
+      var absolute = isUrl(t) ? t : new URL(t, base).href;
+      result.push('/api/proxy?url=' + encodeURIComponent(absolute));
+    } catch (e) {
+      result.push(linesArr[k]);
+    }
+  }
+  return result.join('\n').trim();
+}
+
+async function fetchM3u8Content(m3u8Url) {
+  var output = await fetchWithTimeout(m3u8Url, 4000);
+  if (!output) return null;
+  var resolvedUrl = m3u8Url;
+  var depth = 0;
+  while (output.indexOf('#EXTM3U') === -1 && depth < 3) {
+    var bareUrl = output.trim();
+    if (!isUrl(bareUrl)) break;
+    output = await fetchWithTimeout(bareUrl, 4000);
+    if (!output) break;
+    resolvedUrl = bareUrl;
+    depth++;
+  }
+  if (output.indexOf('#EXTM3U') !== -1) {
+    return rewriteM3u8(output, resolvedUrl);
+  }
+  if (isUrl(output.trim())) {
+    var singleUrl = output.trim();
+    return '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=2560000,RESOLUTION=1920x1080\n/api/proxy?url=' + encodeURIComponent(singleUrl);
+  }
+  return null;
+}
+
+async function tryGetM3u8FromPlaylist(playlistUrl) {
+  try {
+    var plText = await fetchWithTimeout(playlistUrl, 4000);
+    if (!plText) return null;
+    var plData = JSON.parse(plText);
+    var sources = plData.playlist?.[0]?.sources || [];
+    for (var i = 0; i < sources.length; i++) {
+      var file = sources[i].file;
+      if (file && file.indexOf('/error') === -1 && isUrl(file)) {
+        return file;
+      }
+    }
+    return null;
+  } catch (e) {
+    return null;
+  }
 }
 
 export default async function handler(req, res) {
@@ -49,74 +144,38 @@ export default async function handler(req, res) {
       return res.status(404).json({ error: 'No playlist found in xpass page' });
     }
 
-    var playlistUrl = 'https://play.xpass.top' + match[1];
+    var playlistUrls = ['https://play.xpass.top' + match[1]];
 
-    var plText = await smartFetch(playlistUrl);
-    var plData = JSON.parse(plText);
+    var backupRegex = /"url":"([^"]+)"/g;
+    var bMatch;
+    while ((bMatch = backupRegex.exec(html)) !== null) {
+      var url = bMatch[1];
+      if (url.indexOf('/playlist.json') !== -1 && url.indexOf('/mdata/') !== -1) {
+        playlistUrls.push('https://play.xpass.top' + url);
+      }
+    }
 
-    var m3u8Url = plData.playlist?.[0]?.sources?.[0]?.file;
-    if (!m3u8Url || m3u8Url.indexOf('/error') !== -1 || !m3u8Url.startsWith('http')) {
+    playlistUrls = playlistUrls.filter(function (u, i) { return playlistUrls.indexOf(u) === i; });
+
+    var m3u8Candidates = await Promise.all(playlistUrls.map(tryGetM3u8FromPlaylist));
+    var m3u8Urls = m3u8Candidates.filter(Boolean);
+
+    if (m3u8Urls.length === 0) {
       return res.status(200).send('// stream-unavailable');
     }
 
-    function isUrl(s) {
-      return s.startsWith('http://') || s.startsWith('https://');
+    m3u8Urls = m3u8Urls.filter(function (u, i) { return m3u8Urls.indexOf(u) === i; });
+
+    var results = await Promise.all(m3u8Urls.map(fetchM3u8Content));
+    var valid = results.filter(Boolean);
+
+    if (valid.length > 0) {
+      res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+      res.setHeader('Cache-Control', 'public, s-maxage=30, max-age=0');
+      return res.status(200).send(valid[0]);
     }
 
-    function rewriteM3u8(content, sourceUrl) {
-      if (!sourceUrl || !isUrl(sourceUrl)) return content;
-      var base = sourceUrl.substring(0, sourceUrl.lastIndexOf('/') + 1);
-      if (!isUrl(base)) return content;
-      var linesArr = content.split('\n');
-      var result = [];
-      for (var k = 0; k < linesArr.length; k++) {
-        var t = linesArr[k].trim();
-        if (!t || t.startsWith('#')) { result.push(linesArr[k]); continue; }
-        try {
-          var absolute = isUrl(t) ? t : new URL(t, base).href;
-          result.push('/api/proxy?url=' + encodeURIComponent(absolute));
-        } catch (e) {
-          result.push(linesArr[k]);
-        }
-      }
-      return result.join('\n').trim();
-    }
-
-    var output;
-    async function fetchUrl(u) {
-      var r = await fetch(u, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-      });
-      var t = await r.text();
-      if (t.includes('Just a moment') || t.includes('challenges.cloudflare')) {
-        var g = await gasFetch(u);
-        return g.content || '';
-      }
-      return t;
-    }
-
-    output = await fetchUrl(m3u8Url);
-
-    var resolvedUrl = m3u8Url;
-    var depth = 0;
-    while (output.indexOf('#EXTM3U') === -1 && depth < 3) {
-      var bareUrl = output.trim();
-      if (!isUrl(bareUrl)) break;
-      output = await fetchUrl(bareUrl);
-      resolvedUrl = bareUrl;
-      depth++;
-    }
-
-    if (output.indexOf('#EXTM3U') !== -1) {
-      output = rewriteM3u8(output, resolvedUrl);
-    } else if (isUrl(output.trim())) {
-      var singleUrl = output.trim();
-      output = '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=2560000,RESOLUTION=1920x1080\n/api/proxy?url=' + encodeURIComponent(singleUrl);
-    }
-
-    res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
-    res.setHeader('Cache-Control', 'public, s-maxage=30, max-age=0');
-    return res.status(200).send(output);
+    return res.status(200).send('// stream-unavailable');
   } catch (err) {
     return res.status(500).json({ error: err.message, stack: err.stack });
   }

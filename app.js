@@ -500,7 +500,7 @@
     detailWatch.onclick = function () { closeDetail(); openPlayer(item, mediaType); };
     detailModal.classList.add('active');
     document.body.style.overflow = 'hidden';
-    preFetchSource(item, mediaType);
+    if (mediaType !== 'tv') preFetchSource(item, mediaType);
   }
 
   /* ===== FULL-PAGE SHOW VIEW ===== */
@@ -729,7 +729,6 @@
     iframe.style.display = 'none';
     video.style.display = 'block';
     video.removeAttribute('src');
-    showLoader(true, 'Starting player...');
 
     var isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) && /AppleWebKit/.test(navigator.userAgent);
 
@@ -816,10 +815,10 @@
     sourceCache.ready = false;
   }
 
-  function preFetchSource(item, type) {
+  function preFetchSource(item, type, season, episode) {
     clearSourceCache();
-    if (type === 'tv') return;
     var url = '/api/source?tmdbId=' + item.id + '&type=' + type;
+    if (type === 'tv' && season && episode) url += '&season=' + season + '&episode=' + episode;
     fetch(url).then(function (r) {
       if (!r.ok) throw new Error('status ' + r.status);
       return r.text();
@@ -845,7 +844,7 @@
     }
 
     var controller = new AbortController();
-    var timeout = setTimeout(function () { controller.abort(); }, 15000);
+    var timeout = setTimeout(function () { controller.abort(); }, 8000);
 
     fetch(url, { signal: controller.signal }).then(function (r) {
       clearTimeout(timeout);
