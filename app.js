@@ -729,6 +729,7 @@
     iframe.style.display = 'none';
     video.style.display = 'block';
     video.removeAttribute('src');
+    showLoader(true, 'Starting player...');
 
     var isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) && /AppleWebKit/.test(navigator.userAgent);
 
@@ -808,9 +809,6 @@
 
   function fallbackToIframe() {
     showLoader(false);
-    if (currentMedia) {
-      loadServer(serverSelect ? parseInt(serverSelect.value, 10) : 0);
-    }
   }
 
   function clearSourceCache() {
@@ -833,7 +831,7 @@
   }
 
   function attemptCustomPlayer() {
-    if (!currentMedia) { fallbackToIframe(); return; }
+    if (!currentMedia) return;
     var item = currentMedia.item;
     var type = currentMedia.type;
     var sNum = seasonSelect ? seasonSelect.value || 1 : 1;
@@ -841,16 +839,13 @@
     var url = '/api/source?tmdbId=' + item.id + '&type=' + type;
     if (type === 'tv') url += '&season=' + sNum + '&episode=' + eNum;
 
-    showLoader(true, 'Connecting to stream...');
-
     if (sourceCache.url === url && sourceCache.ready) {
-      showLoader(true, 'Starting player...');
       initCustomPlayer(url);
       return;
     }
 
     var controller = new AbortController();
-    var timeout = setTimeout(function () { controller.abort(); }, 8000);
+    var timeout = setTimeout(function () { controller.abort(); }, 15000);
 
     fetch(url, { signal: controller.signal }).then(function (r) {
       clearTimeout(timeout);
@@ -858,17 +853,9 @@
       return r.text();
     }).then(function (body) {
       if (body.indexOf('#EXTM3U') === -1) throw new Error('Not HLS');
-      showLoader(true, 'Starting player...');
       initCustomPlayer(url);
-    }).catch(function (err) {
+    }).catch(function () {
       clearTimeout(timeout);
-      if (err.name === 'AbortError') {
-        console.warn('[CP] Custom player timed out after 8s');
-      } else {
-        console.warn('[CP] Custom player unavailable:', err.message);
-      }
-      showLoader(true, 'Switching to backup server...');
-      setTimeout(fallbackToIframe, 500);
     });
   }
 
@@ -888,6 +875,7 @@
       setupTVControls(item.id);
     } else {
       tvControls.style.display = 'none';
+      loadServer(0);
       attemptCustomPlayer();
     }
     playerModal.classList.add('active');
@@ -952,6 +940,7 @@
         opt.textContent = 'E' + ep.episode_number + ' - ' + ep.name;
         episodeSelect.appendChild(opt);
       });
+      loadServer(0);
       attemptCustomPlayer();
     });
   }
@@ -1034,6 +1023,7 @@
     seasonSelect.addEventListener('change', function () { if (currentMedia) updateEpisodes(currentMedia.item.id, this.value); });
     episodeSelect.addEventListener('change', function () {
       if (currentMedia) {
+        loadServer(0);
         attemptCustomPlayer();
       }
     });
