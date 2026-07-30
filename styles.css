@@ -768,6 +768,18 @@ img {
   overflow: hidden;
 }
 
+.player-shield {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  z-index: 5;
+  cursor: pointer;
+  background: transparent;
+}
+.player-shield:hover {
+  background: rgba(255,255,255,0.05);
+}
+
 .player-wrap iframe,
 .player-wrap .hls-video {
   width: 100% !important;

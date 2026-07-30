@@ -83,27 +83,26 @@ export default async function handler(req, res) {
     }
 
     var output;
-    try {
-      var m3u8Gas = await gasFetch(m3u8Url);
-      output = m3u8Gas.content || '';
-    } catch (e) {
-      var m3u8Direct = await fetch(m3u8Url, {
+    async function fetchUrl(u) {
+      var r = await fetch(u, {
         headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
       });
-      output = await m3u8Direct.text();
+      var t = await r.text();
+      if (t.includes('Just a moment') || t.includes('challenges.cloudflare')) {
+        var g = await gasFetch(u);
+        return g.content || '';
+      }
+      return t;
     }
+
+    output = await fetchUrl(m3u8Url);
 
     var resolvedUrl = m3u8Url;
     var depth = 0;
     while (output.indexOf('#EXTM3U') === -1 && depth < 3) {
       var bareUrl = output.trim();
       if (!isUrl(bareUrl)) break;
-      try {
-        var gasResp = await gasFetch(bareUrl);
-        output = gasResp.content || '';
-      } catch (e) {
-        break;
-      }
+      output = await fetchUrl(bareUrl);
       resolvedUrl = bareUrl;
       depth++;
     }
@@ -116,7 +115,7 @@ export default async function handler(req, res) {
     }
 
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
-    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Cache-Control', 'public, s-maxage=30, max-age=0');
     return res.status(200).send(output);
   } catch (err) {
     return res.status(500).json({ error: err.message, stack: err.stack });

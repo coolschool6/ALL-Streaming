@@ -196,6 +196,7 @@
   var hlsInstance = null;
   var plyrInstance = null;
   var customActive = false;
+  var sourceCache = { url: null, content: null, blobUrl: null };
 
   function initServerSelector() {
     if (document.getElementById('server-select')) {
@@ -499,6 +500,7 @@
     detailWatch.onclick = function () { closeDetail(); openPlayer(item, mediaType); };
     detailModal.classList.add('active');
     document.body.style.overflow = 'hidden';
+    preFetchSource(item, mediaType);
   }
 
   /* ===== FULL-PAGE SHOW VIEW ===== */
@@ -723,6 +725,7 @@
     destroyCustomPlayer();
 
     customActive = true;
+    setShield(false);
     iframe.style.display = 'none';
     video.style.display = 'block';
     video.removeAttribute('src');
@@ -790,6 +793,11 @@
     if (iframe) { iframe.style.display = 'block'; }
   }
 
+  function setShield(show) {
+    var el = document.getElementById('player-shield');
+    if (el) el.style.display = show ? 'block' : 'none';
+  }
+
   function showLoader(show, status) {
     var el = document.getElementById('player-loader');
     var statusEl = document.getElementById('loader-status');
@@ -805,6 +813,31 @@
     }
   }
 
+  function clearSourceCache() {
+    if (sourceCache.blobUrl) { URL.revokeObjectURL(sourceCache.blobUrl); }
+    sourceCache.url = null;
+    sourceCache.content = null;
+    sourceCache.blobUrl = null;
+  }
+
+  function preFetchSource(item, type) {
+    clearSourceCache();
+    if (type === 'tv') return;
+    var url = '/api/source?tmdbId=' + item.id + '&type=' + type;
+    sourceCache.url = url;
+    fetch(url).then(function (r) {
+      if (!r.ok) throw new Error('status ' + r.status);
+      return r.text();
+    }).then(function (body) {
+      if (body.indexOf('#EXTM3U') === -1) throw new Error('Not HLS');
+      sourceCache.content = body;
+      var blob = new Blob([body], { type: 'application/vnd.apple.mpegurl' });
+      sourceCache.blobUrl = URL.createObjectURL(blob);
+    }).catch(function () {
+      sourceCache.content = null;
+    });
+  }
+
   function attemptCustomPlayer() {
     if (!currentMedia) { fallbackToIframe(); return; }
     var item = currentMedia.item;
@@ -816,6 +849,12 @@
 
     showLoader(true, 'Connecting to stream...');
 
+    if (sourceCache.url === url && sourceCache.blobUrl) {
+      showLoader(true, 'Starting player...');
+      initCustomPlayer(sourceCache.blobUrl);
+      return;
+    }
+
     var controller = new AbortController();
     var timeout = setTimeout(function () { controller.abort(); }, 8000);
 
@@ -825,8 +864,10 @@
       return r.text();
     }).then(function (body) {
       if (body.indexOf('#EXTM3U') === -1) throw new Error('Not HLS');
+      var blob = new Blob([body], { type: 'application/vnd.apple.mpegurl' });
+      var blobUrl = URL.createObjectURL(blob);
       showLoader(true, 'Starting player...');
-      initCustomPlayer(url);
+      initCustomPlayer(blobUrl);
     }).catch(function (err) {
       clearTimeout(timeout);
       if (err.name === 'AbortError') {
@@ -872,6 +913,7 @@
     var server = SERVERS[serverIndex] || SERVERS[0];
     if (serverSelect) serverSelect.value = serverIndex.toString();
     playerIframe.src = buildEmbedURL(server, type, item.id, sNum, eNum);
+    setShield(true);
     showOverlay();
   }
 
@@ -886,6 +928,7 @@
 
   function closePlayer() {
     destroyCustomPlayer();
+    clearSourceCache();
     playerIframe.src = 'about:blank';
     playerModal.classList.remove('active');
     document.body.style.overflow = '';
