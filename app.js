@@ -727,8 +727,32 @@
     video.style.display = 'block';
     video.removeAttribute('src');
 
-    if (typeof Hls !== 'undefined' && Hls.isSupported()) {
-      hlsInstance = new Hls();
+    var isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) && /AppleWebKit/.test(navigator.userAgent);
+
+    if (video.canPlayType('application/vnd.apple.mpegurl') || isIOS) {
+      video.src = sourceUrl;
+      video.addEventListener('loadedmetadata', function () {
+        if (typeof Plyr !== 'undefined') {
+          plyrInstance = new Plyr(video, {
+            controls: ['play-large', 'play', 'progress', 'current-time', 'duration', 'mute', 'volume', 'fullscreen'],
+            settings: ['speed']
+          });
+        }
+        showLoader(false);
+        video.play().catch(function () {});
+      }, { once: true });
+      video.addEventListener('error', function () {
+        destroyCustomPlayer();
+        fallbackToIframe();
+      }, { once: true });
+    } else if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+      hlsInstance = new Hls({
+        maxBufferLength: 30,
+        maxMaxBufferLength: 60,
+        enableWorker: true,
+        lowLatencyMode: false,
+        backBufferLength: 15
+      });
       hlsInstance.loadSource(sourceUrl);
       hlsInstance.attachMedia(video);
       hlsInstance.on(Hls.Events.MANIFEST_PARSED, function () {
@@ -739,21 +763,20 @@
             speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 2] }
           });
         }
+        showLoader(false);
         video.play().catch(function () {});
       });
       hlsInstance.on(Hls.Events.ERROR, function (e, data) {
         if (data.fatal) {
           destroyCustomPlayer();
-          loadServer(1);
+          fallbackToIframe();
         }
       });
-    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      video.src = sourceUrl;
-      if (typeof Plyr !== 'undefined') plyrInstance = new Plyr(video);
     } else {
       customActive = false;
-      iframe.style.display = 'block';
       video.style.display = 'none';
+      iframe.style.display = 'block';
+      showLoader(false);
     }
   }
 
@@ -767,8 +790,23 @@
     if (iframe) { iframe.style.display = 'block'; }
   }
 
+  function showLoader(show, status) {
+    var el = document.getElementById('player-loader');
+    var statusEl = document.getElementById('loader-status');
+    if (!el) return;
+    el.classList.toggle('hidden', !show);
+    if (status && statusEl) statusEl.textContent = status;
+  }
+
+  function fallbackToIframe() {
+    showLoader(false);
+    if (currentMedia) {
+      loadServer(serverSelect ? parseInt(serverSelect.value, 10) : 0);
+    }
+  }
+
   function attemptCustomPlayer() {
-    if (!currentMedia) return;
+    if (!currentMedia) { fallbackToIframe(); return; }
     var item = currentMedia.item;
     var type = currentMedia.type;
     var sNum = seasonSelect ? seasonSelect.value || 1 : 1;
@@ -776,16 +814,24 @@
     var url = '/api/source?tmdbId=' + item.id + '&type=' + type;
     if (type === 'tv') url += '&season=' + sNum + '&episode=' + eNum;
 
-    console.log('[CP] attemptCustomPlayer called for', item.id, type, url);
-    fetch(url).then(function (r) {
-      if (!r.ok) throw new Error('Custom source not available (status ' + r.status + ')');
+    showLoader(true, 'Connecting to stream...');
+
+    var controller = new AbortController();
+    var timeout = setTimeout(function () { controller.abort(); }, 2500);
+
+    fetch(url, { signal: controller.signal }).then(function (r) {
+      clearTimeout(timeout);
+      if (!r.ok) throw new Error('status ' + r.status);
       return r.text();
     }).then(function (body) {
-      console.log('[CP] source API returned ' + body.length + ' bytes, starts with:', body.substring(0, 60));
-      if (body.indexOf('#EXTM3U') === -1) throw new Error('Response is not HLS playlist');
+      if (body.indexOf('#EXTM3U') === -1) throw new Error('Not HLS');
+      showLoader(true, 'Starting player...');
       initCustomPlayer(url);
     }).catch(function (err) {
+      clearTimeout(timeout);
       console.warn('[CP] Custom player unavailable:', err.message);
+      showLoader(true, 'Switching to backup server...');
+      setTimeout(fallbackToIframe, 500);
     });
   }
 
@@ -796,12 +842,15 @@
     playerIframe.setAttribute('allow', 'autoplay; encrypted-media; fullscreen; picture-in-picture');
     playerIframe.style.cssText = 'width:100%; height:100%; border:0; display:block;';
 
+    document.getElementById('hls-video').style.display = 'none';
+    playerIframe.src = 'about:blank';
+    showLoader(true, 'Loading stream...');
+
     if (mediaType === 'tv') {
       tvControls.style.display = 'flex';
       setupTVControls(item.id);
     } else {
       tvControls.style.display = 'none';
-      loadServer(0);
       attemptCustomPlayer();
     }
     playerModal.classList.add('active');
@@ -810,7 +859,8 @@
 
   function loadServer(serverIndex) {
     if (!currentMedia) return;
-    if (serverIndex !== 0) destroyCustomPlayer();
+    destroyCustomPlayer();
+    showLoader(false);
     var item = currentMedia.item;
     var type = currentMedia.type;
     var sNum = seasonSelect.value || 1;
@@ -863,7 +913,6 @@
         opt.textContent = 'E' + ep.episode_number + ' - ' + ep.name;
         episodeSelect.appendChild(opt);
       });
-      loadServer(0);
       attemptCustomPlayer();
     });
   }
@@ -946,7 +995,6 @@
     seasonSelect.addEventListener('change', function () { if (currentMedia) updateEpisodes(currentMedia.item.id, this.value); });
     episodeSelect.addEventListener('change', function () {
       if (currentMedia) {
-        loadServer(serverSelect ? parseInt(serverSelect.value, 10) : 0);
         attemptCustomPlayer();
       }
     });

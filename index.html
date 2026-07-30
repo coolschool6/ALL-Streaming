@@ -96,7 +96,11 @@
     </div>
     <div class="player-wrap">
       <iframe id="player-iframe" allowfullscreen allow="autoplay; encrypted-media; picture-in-picture; clipboard-write" referrerpolicy="no-referrer-when-downgrade"></iframe>
-      <video id="hls-video" class="hls-video" crossorigin playsinline style="display:none; width:100%; height:100%;"></video>
+      <div class="player-loader hidden" id="player-loader">
+        <div class="spinner"></div>
+        <div class="loader-status" id="loader-status">Loading stream...</div>
+      </div>
+      <video id="hls-video" class="hls-video" crossorigin playsinline webkit-playsinline style="display:none; width:100%; height:100%;"></video>
       <div id="player-overlay"></div>
     </div>
   </div>
