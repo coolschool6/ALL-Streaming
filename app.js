@@ -817,7 +817,7 @@
     showLoader(true, 'Connecting to stream...');
 
     var controller = new AbortController();
-    var timeout = setTimeout(function () { controller.abort(); }, 2500);
+    var timeout = setTimeout(function () { controller.abort(); }, 8000);
 
     fetch(url, { signal: controller.signal }).then(function (r) {
       clearTimeout(timeout);
@@ -829,7 +829,11 @@
       initCustomPlayer(url);
     }).catch(function (err) {
       clearTimeout(timeout);
-      console.warn('[CP] Custom player unavailable:', err.message);
+      if (err.name === 'AbortError') {
+        console.warn('[CP] Custom player timed out after 8s');
+      } else {
+        console.warn('[CP] Custom player unavailable:', err.message);
+      }
       showLoader(true, 'Switching to backup server...');
       setTimeout(fallbackToIframe, 500);
     });
