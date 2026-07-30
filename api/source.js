@@ -1,4 +1,4 @@
-var GAS_URL = 'https://script.google.com/macros/s/AKfycbwLLoqYeMjV3eERrQ5NXJyJmr4ZhWHwJqwcbOVuF5yy_lwHy77leaFbDrS9GyWt-5pp/exec';
+var GAS_URL = 'https://script.google.com/macros/s/AKfycbxENxJOCkcRQsYYGa-zGFwjz7R6-JRGHB5WP4lFqszzlQiFmLXT6IJihUGLmtxhBuPa/exec';
 
 function gasFetch(url) {
   return fetch(GAS_URL + '?action=fetch_url&url=' + encodeURIComponent(url))
