@@ -7,6 +7,50 @@ var RESULT_CACHE = {};
 var RESULT_CACHE_TTL = 24 * 60 * 60 * 1000;
 var RESULT_CACHE_MAX = 300;
 
+var UPSTASH_URL = process.env.UPSTASH_REDIS_REST_URL;
+var UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
+var UPSTASH_TTL = 24 * 60 * 60;
+
+function upstashEnabled() {
+  return !!(UPSTASH_URL && UPSTASH_TOKEN);
+}
+
+async function upstashGet(key) {
+  if (!upstashEnabled()) return null;
+  try {
+    var ctrl = new AbortController();
+    var t = setTimeout(function() { ctrl.abort(); }, 2000);
+    var r = await fetch(UPSTASH_URL + '/get/' + key, {
+      headers: { 'Authorization': 'Bearer ' + UPSTASH_TOKEN },
+      signal: ctrl.signal
+    });
+    clearTimeout(t);
+    if (!r.ok) return null;
+    var data = await r.json();
+    var v = data && data.result;
+    if (v === null || v === undefined || v === '') return null;
+    return typeof v === 'string' ? JSON.parse(v) : v;
+  } catch (e) { return null; }
+}
+
+async function upstashSet(key, value) {
+  if (!upstashEnabled()) return;
+  try {
+    var ctrl = new AbortController();
+    var t = setTimeout(function() { ctrl.abort(); }, 2000);
+    await fetch(UPSTASH_URL + '/set/' + key + '?EX=' + UPSTASH_TTL, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + UPSTASH_TOKEN,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(value),
+      signal: ctrl.signal
+    });
+    clearTimeout(t);
+  } catch (e) { /* shared cache is best-effort only */ }
+}
+
 var IMDB_CACHE = {};
 var IMDB_CACHE_TTL = 24 * 60 * 60 * 1000;
 
@@ -139,6 +183,13 @@ export default async function handler(req, res) {
   if (cached) {
     cached.cached = true;
     return res.status(200).json(cached);
+  }
+
+  var shared = await upstashGet(cacheKey);
+  if (shared) {
+    cacheSet(cacheKey, shared);
+    shared.cached = 'shared';
+    return res.status(200).json(shared);
   }
 
   try {
@@ -333,6 +384,7 @@ export default async function handler(req, res) {
 
     var payload = { hlsUrl: hlsUrl, source: sourceName, debug: debugInfo };
     cacheSet(cacheKey, payload);
+    await upstashSet(cacheKey, payload);
 
     return res.status(200).json(payload);
 
