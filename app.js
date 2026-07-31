@@ -196,7 +196,7 @@
   var hlsInstance = null;
   var plyrInstance = null;
   var customActive = false;
-  var sourceCache = { url: null, ready: false };
+  var sourceCache = { url: null, hlsUrl: null, ready: false };
 
   function initServerSelector() {
     if (document.getElementById('server-select')) {
@@ -810,58 +810,75 @@
     if (status && statusEl) statusEl.textContent = status;
   }
 
-  function fallbackToIframe() {
+  function showPlayerError(msg) {
     showLoader(false);
+    var video = document.getElementById('hls-video');
+    var label = document.getElementById('source-label');
+    if (video) { video.style.display = 'none'; video.removeAttribute('src'); }
+    if (label) { label.textContent = msg; label.style.display = 'block'; label.style.background = 'rgba(255,0,0,0.3)'; label.style.padding = '10px'; }
+  }
+
+  function fallbackToIframe() {
+    showPlayerError('Custom player failed. Select a server from the dropdown.');
   }
 
   function clearSourceCache() {
     sourceCache.url = null;
+    sourceCache.hlsUrl = null;
     sourceCache.ready = false;
     sourceCache.source = '';
   }
 
   function preFetchSource(item, type, season, episode) {
     clearSourceCache();
-    var url = '/api/source?tmdbId=' + item.id + '&type=' + type;
+    var url = '/api/torbox-source?tmdbId=' + item.id + '&type=' + type;
     if (type === 'tv' && season && episode) url += '&season=' + season + '&episode=' + episode;
     fetch(url).then(function (r) {
       if (!r.ok) throw new Error('status ' + r.status);
-      sourceCache.source = r.headers.get('X-Source') || '';
-      return r.text();
-    }).then(function (body) {
-      if (body.indexOf('#EXTM3U') === -1) throw new Error('Not HLS');
+      return r.json();
+    }).then(function (data) {
+      if (!data.hlsUrl) throw new Error('No HLS URL');
+      sourceCache.hlsUrl = data.hlsUrl;
+      sourceCache.source = data.source || 'TorBox';
       sourceCache.url = url;
       sourceCache.ready = true;
     }).catch(function () {});
   }
 
   function attemptCustomPlayer() {
-    if (!currentMedia) return;
-    var item = currentMedia.item;
-    var type = currentMedia.type;
-    var sNum = seasonSelect ? seasonSelect.value || 1 : 1;
-    var eNum = episodeSelect ? episodeSelect.value || 1 : 1;
-    var url = '/api/source?tmdbId=' + item.id + '&type=' + type;
-    if (type === 'tv') url += '&season=' + sNum + '&episode=' + eNum;
+    return new Promise(function (resolve, reject) {
+      if (!currentMedia) { reject(); return; }
+      var item = currentMedia.item;
+      var type = currentMedia.type;
+      var sNum = seasonSelect ? seasonSelect.value || 1 : 1;
+      var eNum = episodeSelect ? episodeSelect.value || 1 : 1;
+      var url = '/api/torbox-source?tmdbId=' + item.id + '&type=' + type;
+      if (type === 'tv') url += '&season=' + sNum + '&episode=' + eNum;
 
-    if (sourceCache.url === url && sourceCache.ready) {
-      initCustomPlayer(url, sourceCache.source);
-      return;
-    }
+      if (sourceCache.url === url && sourceCache.ready && sourceCache.hlsUrl) {
+        initCustomPlayer(sourceCache.hlsUrl, sourceCache.source);
+        resolve(); return;
+      }
 
-    var controller = new AbortController();
-    var timeout = setTimeout(function () { controller.abort(); }, 8000);
+      var controller = new AbortController();
+      var timeout = setTimeout(function () { controller.abort(); }, 8000);
 
-    fetch(url, { signal: controller.signal }).then(function (r) {
-      clearTimeout(timeout);
-      if (!r.ok) throw new Error('status ' + r.status);
-      var src = r.headers.get('X-Source') || '';
-      return r.text().then(function (body) {
-        if (body.indexOf('#EXTM3U') === -1) throw new Error('Not HLS');
-        initCustomPlayer(url, src);
+      fetch(url, { signal: controller.signal }).then(function (r) {
+        clearTimeout(timeout);
+        if (!r.ok) throw new Error('status ' + r.status);
+        return r.json();
+      }).then(function (data) {
+        if (!data.hlsUrl) throw new Error('No HLS URL');
+        sourceCache.hlsUrl = data.hlsUrl;
+        sourceCache.source = data.source || 'TorBox';
+        sourceCache.url = url;
+        sourceCache.ready = true;
+        initCustomPlayer(data.hlsUrl, data.source || 'TorBox');
+        resolve();
+      }).catch(function () {
+        clearTimeout(timeout);
+        reject();
       });
-    }).catch(function () {
-      clearTimeout(timeout);
     });
   }
 
@@ -881,8 +898,7 @@
       setupTVControls(item.id);
     } else {
       tvControls.style.display = 'none';
-      loadServer(0);
-      attemptCustomPlayer();
+      attemptCustomPlayer().catch(function () { showPlayerError('Custom player failed. Use server selector.'); });
     }
     playerModal.classList.add('active');
     document.body.style.overflow = 'hidden';
@@ -946,8 +962,7 @@
         opt.textContent = 'E' + ep.episode_number + ' - ' + ep.name;
         episodeSelect.appendChild(opt);
       });
-      loadServer(0);
-      attemptCustomPlayer();
+      attemptCustomPlayer().catch(function () { showPlayerError('Custom player failed. Use server selector.'); });
     });
   }
 
@@ -1029,8 +1044,10 @@
     seasonSelect.addEventListener('change', function () { if (currentMedia) updateEpisodes(currentMedia.item.id, this.value); });
     episodeSelect.addEventListener('change', function () {
       if (currentMedia) {
-        loadServer(0);
-        attemptCustomPlayer();
+        destroyCustomPlayer();
+        showLoader(true, 'Loading stream...');
+        playerIframe.src = 'about:blank';
+        attemptCustomPlayer().catch(function () { showPlayerError('Custom player failed. Use server selector.'); });
       }
     });
     playerClose.addEventListener('click', closePlayer);
