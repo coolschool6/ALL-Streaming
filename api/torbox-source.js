@@ -45,17 +45,33 @@ function parseQuality(title) {
   return 0;
 }
 
+function parseCodec(title) {
+  var u = (title || '').toUpperCase();
+  if (/H\.?26[45]|HEVC|AVC|X26[45]/.test(u)) {
+    if (/H\.?265|HEVC|X265/.test(u)) return 'hevc';
+    if (/H\.?264|AVC|X264/.test(u)) return 'avc';
+  }
+  return '';
+}
+
 function pickBestStream(streams) {
   if (!streams || streams.length === 0) return null;
   var best = null;
   var bestQ = -1;
+  var bestCodecPref = -1;
   for (var i = 0; i < streams.length; i++) {
     var s = streams[i];
     if (!s.infoHash) continue;
     var q = parseQuality(s.title);
-    if (q > bestQ) { bestQ = q; best = s; }
+    var codec = parseCodec(s.title);
+    var codecPref = codec === 'avc' ? 2 : (codec === 'hevc' ? 1 : 0);
+    if (codecPref > bestCodecPref || (codecPref === bestCodecPref && q > bestQ)) {
+      bestCodecPref = codecPref;
+      bestQ = q;
+      best = s;
+    }
   }
-  return { stream: best, quality: bestQ };
+  return { stream: best, quality: bestQ, codec: bestCodecPref === 2 ? 'avc' : (bestCodecPref === 1 ? 'hevc' : '') };
 }
 
 export default async function handler(req, res) {
@@ -117,21 +133,45 @@ export default async function handler(req, res) {
       return res.status(404).json({ error: 'No torrent streams found' });
     }
 
-    var picked = pickBestStream(tr.streams);
-    if (!picked || !picked.stream) {
-      return res.status(404).json({ error: 'No usable torrent streams' });
-    }
-    var best = picked.stream;
-    var bestQ = picked.quality;
-    var hash = best.infoHash;
-    var hashResult = await torboxFetch('/torrents/checkcached?hash=' + hash + '&format=object&list_files=true');
+    var candidates = tr.streams
+      .filter(function(s) { return s && s.infoHash; })
+      .sort(function(a, b) {
+        var ca = parseCodec(a.title), cb = parseCodec(b.title);
+        var pa = ca === 'avc' ? 2 : (ca === 'hevc' ? 1 : 0);
+        var pb = cb === 'avc' ? 2 : (cb === 'hevc' ? 1 : 0);
+        if (pb !== pa) return pb - pa;
+        return parseQuality(b.title) - parseQuality(a.title);
+      });
 
+    var best = null;
+    var bestQ = 0;
+    var hash = null;
     var isCached = false;
     var cachedFiles = [];
-    if (hashResult && hashResult.success && hashResult.data && typeof hashResult.data === 'object' && !Array.isArray(hashResult.data)) {
-      var hashData = hashResult.data[hash];
-      if (hashData) isCached = true;
-      if (hashData && hashData.files) cachedFiles = hashData.files;
+    var chosenCodec = '';
+
+    for (var ci = 0; ci < candidates.length; ci++) {
+      var cand = candidates[ci];
+      var candHash = cand.infoHash;
+      var hashResult = await torboxFetch('/torrents/checkcached?hash=' + candHash + '&format=object&list_files=true');
+
+      var candCached = false;
+      var candFiles = [];
+      if (hashResult && hashResult.success && hashResult.data && typeof hashResult.data === 'object' && !Array.isArray(hashResult.data)) {
+        var hashData = hashResult.data[candHash];
+        if (hashData) candCached = true;
+        if (hashData && hashData.files) candFiles = hashData.files;
+      }
+
+      if (candCached) {
+        best = cand;
+        bestQ = parseQuality(cand.title);
+        hash = candHash;
+        isCached = true;
+        cachedFiles = candFiles;
+        chosenCodec = parseCodec(cand.title);
+        break;
+      }
     }
 
     if (!isCached) {
@@ -203,11 +243,13 @@ export default async function handler(req, res) {
       hash: hash,
       torrentId: torrentId,
       fileId: fileId,
+      codec: chosenCodec,
       needsTranscoding: stream.data.needs_transcoding,
       isTranscoding: stream.data.is_transcoding,
       isCached: isCached,
       serverTime: Date.now(),
-      streamUrl: streamUrl
+      streamUrl: streamUrl,
+      candidatesChecked: ci + 1
     };
 
     return res.status(200).json({ hlsUrl: hlsUrl, source: sourceName, debug: debugInfo });
