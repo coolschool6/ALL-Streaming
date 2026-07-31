@@ -3,13 +3,6 @@ var TMDB_KEY = process.env.TMDB_API_KEY || 'cd27a14dfc1752e04b474124a5af6d2b';
 var TORBOX_KEY = process.env.TORBOX_API_KEY;
 var TORBOX_API = 'https://api.torbox.app/v1/api';
 
-// Multiple Scraper Mirrors (Fallbacks if Torrentio blocks Vercel IPs)
-var SCRAPERS = [
-  'https://torrentio.strem.fun',
-  'https://knightcrawler.elfhosted.com',
-  'https://torrentio.elfhosted.com'
-];
-
 // Fetch Utility Wrappers
 async function tmdbFetch(path) {
   if (!TMDB_KEY) return null;
@@ -27,7 +20,7 @@ async function torboxFetch(path) {
   if (!TORBOX_KEY) return null;
   try {
     var ctrl = new AbortController();
-    var t = setTimeout(function() { ctrl.abort(); }, 3500);
+    var t = setTimeout(function() { ctrl.abort(); }, 4000);
     var r = await fetch(TORBOX_API + path, {
       headers: { 'Authorization': 'Bearer ' + TORBOX_KEY },
       signal: ctrl.signal
@@ -42,7 +35,7 @@ async function torboxPost(path, body) {
   if (!TORBOX_KEY) return null;
   try {
     var ctrl = new AbortController();
-    var t = setTimeout(function() { ctrl.abort(); }, 4000);
+    var t = setTimeout(function() { ctrl.abort(); }, 4500);
     var r = await fetch(TORBOX_API + path, {
       method: 'POST',
       headers: {
@@ -77,39 +70,89 @@ function parseCodec(title) {
   return '';
 }
 
-// Scraper Fetch Function with Fallbacks & User-Agent Masking
-async function fetchStreamsFromScrapers(imdbId, type, season, episode) {
+// Parallel Stream Fetching across Multiple Addons & APIs
+async function fetchSingleScraper(baseUrl, subPath) {
+  var ctrl = new AbortController();
+  var t = setTimeout(function() { ctrl.abort(); }, 4500);
+  try {
+    var res = await fetch(baseUrl + subPath, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'application/json'
+      },
+      signal: ctrl.signal
+    });
+    clearTimeout(t);
+    if (!res.ok) throw new Error('Bad response');
+    var data = await res.json();
+    if (data && data.streams && data.streams.length > 0) {
+      return data.streams;
+    }
+    throw new Error('No streams');
+  } catch (e) {
+    clearTimeout(t);
+    throw e;
+  }
+}
+
+// YTS API Backup (Guaranteed work for Movies on Vercel)
+async function fetchYtsStreams(imdbId) {
+  try {
+    var ctrl = new AbortController();
+    var t = setTimeout(function() { ctrl.abort(); }, 3500);
+    var res = await fetch('https://yts.mx/api/v2/list_movies.json?query_term=' + imdbId, { signal: ctrl.signal });
+    clearTimeout(t);
+    if (!res.ok) return [];
+    var data = await res.json();
+    if (data && data.data && data.data.movies && data.data.movies[0] && data.data.movies[0].torrents) {
+      return data.data.movies[0].torrents.map(function(t) {
+        return {
+          infoHash: t.hash,
+          title: 'YTS ' + t.quality + ' ' + t.type
+        };
+      });
+    }
+    return [];
+  } catch (e) {
+    return [];
+  }
+}
+
+async function getAllCandidateStreams(imdbId, type, season, episode) {
   var subPath = type === 'tv'
     ? '/stream/series/' + imdbId + ':' + season + ':' + episode + '.json'
     : '/stream/movie/' + imdbId + '.json';
 
-  for (var i = 0; i < SCRAPERS.length; i++) {
-    var baseUrl = SCRAPERS[i];
-    try {
-      var ctrl = new AbortController();
-      var t = setTimeout(function() { ctrl.abort(); }, 3000);
-      var res = await fetch(baseUrl + subPath, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        },
-        signal: ctrl.signal
-      });
-      clearTimeout(t);
+  var scrapers = [
+    'https://torrentio.strem.fun',
+    'https://knightcrawler.elfhosted.com',
+    'https://torrentio.elfhosted.com',
+    'https://stremio-addons.com'
+  ];
 
-      if (res.ok) {
-        var data = await res.json();
-        if (data && data.streams && data.streams.length > 0) {
-          return data.streams;
-        }
-      }
-    } catch (e) {
-      // Continue to next mirror on timeout/error
-    }
+  // Fire all scrapers simultaneously
+  var promises = scrapers.map(function(url) { return fetchSingleScraper(url, subPath); });
+  
+  if (type === 'movie') {
+    promises.push(fetchYtsStreams(imdbId));
   }
-  return null;
+
+  // Return the fastest successful provider
+  try {
+    var results = await Promise.allSettled(promises);
+    var combined = [];
+    for (var i = 0; i < results.length; i++) {
+      if (results[i].status === 'fulfilled' && Array.isArray(results[i].value)) {
+        combined = combined.concat(results[i].value);
+      }
+    }
+    return combined;
+  } catch (e) {
+    return [];
+  }
 }
 
-// Internal Logic Runner
+// Main Process Execution
 async function processStreamRequest(req) {
   var tmdbId = req.query.tmdbId;
   var type = req.query.type;
@@ -136,19 +179,25 @@ async function processStreamRequest(req) {
     return { status: 404, payload: { error: 'Could not resolve IMDb ID from TMDB' } };
   }
 
-  // 2. Fetch Streams across Mirror Scrapers
-  var streams = await fetchStreamsFromScrapers(imdbId, type, season, episode);
+  // 2. Fetch Streams in Parallel
+  var streams = await getAllCandidateStreams(imdbId, type, season, episode);
 
   if (!streams || streams.length === 0) {
     return { status: 404, payload: { error: 'Torrent search connection timed out or no streams available.' } };
   }
 
-  // 3. Clean & Sort Candidates
+  // 3. Clean & Deduplicate Candidates
+  var hashSet = new Set();
   var candidates = streams
-    .filter(function(s) { return s && s.infoHash; })
+    .filter(function(s) { return s && (s.infoHash || s.hash); })
     .map(function(s) {
-      s.cleanHash = String(s.infoHash).trim().toLowerCase();
+      s.cleanHash = String(s.infoHash || s.hash).trim().toLowerCase();
       return s;
+    })
+    .filter(function(s) {
+      if (hashSet.has(s.cleanHash)) return false;
+      hashSet.add(s.cleanHash);
+      return true;
     })
     .sort(function(a, b) {
       var ca = parseCodec(a.title), cb = parseCodec(b.title);
@@ -292,7 +341,7 @@ async function processStreamRequest(req) {
   };
 }
 
-// Exported Handler With Strict Vercel Timeout Guard
+// Exported Handler
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -315,7 +364,7 @@ export default async function handler(req, res) {
   var timeoutPromise = new Promise(function(resolve) {
     setTimeout(function() {
       resolve({ status: 404, payload: { error: 'Stream lookup timed out. Fallback to server selector.' } });
-    }, 8500);
+    }, 9000);
   });
 
   try {
