@@ -125,9 +125,9 @@ export default async function handler(req, res) {
 
     var isCached = false;
     var cachedFiles = [];
-    if (hashResult && hashResult.success && hashResult.data) {
+    if (hashResult && hashResult.success && hashResult.data && typeof hashResult.data === 'object' && !Array.isArray(hashResult.data)) {
       var hashData = hashResult.data[hash];
-      if (hashData && hashData.cached) isCached = true;
+      if (hashData) isCached = true;
       if (hashData && hashData.files) cachedFiles = hashData.files;
     }
 
