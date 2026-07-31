@@ -1,38 +1,49 @@
-var GAS_URL = 'https://script.google.com/macros/s/AKfycbxENxJOCkcRQsYYGa-zGFwjz7R6-JRGHB5WP4lFqszzlQiFmLXT6IJihUGLmtxhBuPa/exec';
+var DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbxENxJOCkcRQsYYGa-zGFwjz7R6-JRGHB5WP4lFqszzlQiFmLXT6IJihUGLmtxhBuPa/exec';
+var GAS_URL = process.env.GAS_URL || DEFAULT_GAS_URL;
 
 function gasFetch(url) {
-  return fetch(GAS_URL + '?action=fetch_url&url=' + encodeURIComponent(url))
-    .then(function (r) { return r.json(); })
+  var ctrl = new AbortController();
+  var t = setTimeout(function() { ctrl.abort(); }, 6000);
+  return fetch(GAS_URL + '?action=fetch_url&url=' + encodeURIComponent(url), { signal: ctrl.signal })
+    .then(function (r) { clearTimeout(t); return r.json(); })
     .then(function (d) {
       if (d.error) throw new Error(d.error);
       return d;
+    })
+    .catch(function (err) {
+      clearTimeout(t);
+      throw err;
     });
 }
 
 async function smartFetch(url) {
   var controller = new AbortController();
-  var id = setTimeout(function () { controller.abort(); }, 3000);
+  var id = setTimeout(function () { controller.abort(); }, 3500);
   try {
     var direct = await fetch(url, {
       signal: controller.signal,
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }
     });
+    clearTimeout(id);
     var text = await direct.text();
     if (text.includes('Just a moment') || text.includes('challenges.cloudflare')) {
       var viaGas = await gasFetch(url);
-      return viaGas.content;
+      return viaGas.content || '';
     }
     return text;
   } catch (e) {
-    var viaGas = await gasFetch(url);
-    return viaGas.content;
-  } finally {
     clearTimeout(id);
+    try {
+      var viaGasFallback = await gasFetch(url);
+      return viaGasFallback.content || '';
+    } catch (gasErr) {
+      return '';
+    }
   }
 }
 
 function isUrl(s) {
-  return s && (s.startsWith('http://') || s.startsWith('https://'));
+  return s && typeof s === 'string' && (s.startsWith('http://') || s.startsWith('https://'));
 }
 
 async function fetchWithTimeout(url, ms) {
@@ -43,6 +54,7 @@ async function fetchWithTimeout(url, ms) {
       signal: controller.signal,
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
     });
+    clearTimeout(id);
     var t = await r.text();
     if (t.includes('Just a moment') || t.includes('challenges.cloudflare')) {
       var g = await gasFetch(url);
@@ -50,9 +62,13 @@ async function fetchWithTimeout(url, ms) {
     }
     return t;
   } catch (e) {
-    return '';
-  } finally {
     clearTimeout(id);
+    try {
+      var fallbackG = await gasFetch(url);
+      return fallbackG.content || '';
+    } catch (err) {
+      return '';
+    }
   }
 }
 
@@ -60,11 +76,21 @@ function rewriteM3u8(content, sourceUrl) {
   if (!sourceUrl || !isUrl(sourceUrl)) return content;
   var base = sourceUrl.substring(0, sourceUrl.lastIndexOf('/') + 1);
   if (!isUrl(base)) return content;
+
   var linesArr = content.split('\n');
   var result = [];
+
   for (var k = 0; k < linesArr.length; k++) {
     var t = linesArr[k].trim();
-    if (!t || t.startsWith('#')) { result.push(linesArr[k]); continue; }
+    if (!t || t.startsWith('#')) { 
+      result.push(linesArr[k]); 
+      continue; 
+    }
+    // Don't re-proxy if link already contains proxy call
+    if (t.includes('/api/proxy?url=')) {
+      result.push(t);
+      continue;
+    }
     try {
       var absolute = isUrl(t) ? t : new URL(t, base).href;
       result.push('/api/proxy?url=' + encodeURIComponent(absolute));
@@ -76,23 +102,27 @@ function rewriteM3u8(content, sourceUrl) {
 }
 
 async function fetchM3u8Content(m3u8Url) {
-  var output = await fetchWithTimeout(m3u8Url, 3000);
+  var output = await fetchWithTimeout(m3u8Url, 3500);
   if (!output) return null;
   var resolvedUrl = m3u8Url;
   var depth = 0;
+
   while (output.indexOf('#EXTM3U') === -1 && depth < 3) {
     var bareUrl = output.trim();
     if (!isUrl(bareUrl)) break;
-    output = await fetchWithTimeout(bareUrl, 3000);
+    output = await fetchWithTimeout(bareUrl, 3500);
     if (!output) break;
     resolvedUrl = bareUrl;
     depth++;
   }
+
   if (output.indexOf('#EXTM3U') !== -1) {
     return rewriteM3u8(output, resolvedUrl);
   }
+
   if (isUrl(output.trim())) {
     var singleUrl = output.trim();
+    if (singleUrl.includes('/api/proxy?url=')) return '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=2560000,RESOLUTION=1920x1080\n' + singleUrl;
     return '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=2560000,RESOLUTION=1920x1080\n/api/proxy?url=' + encodeURIComponent(singleUrl);
   }
   return null;
@@ -100,10 +130,10 @@ async function fetchM3u8Content(m3u8Url) {
 
 async function tryGetM3u8FromPlaylist(playlistUrl) {
   try {
-    var plText = await fetchWithTimeout(playlistUrl, 3000);
+    var plText = await fetchWithTimeout(playlistUrl, 3500);
     if (!plText) return null;
     var plData = JSON.parse(plText);
-    var sources = plData.playlist?.[0]?.sources || [];
+    var sources = plData.playlist && plData.playlist[0] ? plData.playlist[0].sources : [];
     for (var i = 0; i < sources.length; i++) {
       var file = sources[i].file;
       if (file && file.indexOf('/error') === -1 && isUrl(file)) {
@@ -129,7 +159,7 @@ export default async function handler(req, res) {
   var episode = req.query.episode || '1';
 
   if (!tmdbId || !type) {
-    return res.status(400).json({ error: 'Missing tmdbId or type' });
+    return res.status(400).json({ error: 'Missing required parameters: tmdbId or type' });
   }
 
   try {
@@ -138,10 +168,13 @@ export default async function handler(req, res) {
       : 'https://play.xpass.top/e/movie/' + tmdbId + '?autostart=true';
 
     var html = await smartFetch(xpassUrl);
+    if (!html) {
+      return res.status(502).json({ error: 'Failed to retrieve source page content.' });
+    }
 
     var match = html.match(/"playlist":"([^"]+)"/);
     if (!match) {
-      return res.status(404).json({ error: 'No playlist found in xpass page' });
+      return res.status(404).json({ error: 'No playlist found on xpass provider.' });
     }
 
     var primaryPlaylistUrl = 'https://play.xpass.top' + match[1];
@@ -171,16 +204,19 @@ export default async function handler(req, res) {
 
     var backupM3u8Candidates = await Promise.all(backupPlaylistUrls.map(tryGetM3u8FromPlaylist));
     var backupM3u8Urls = backupM3u8Candidates.filter(Boolean);
+
     if (backupM3u8Urls.length > 0) {
       backupM3u8Urls = backupM3u8Urls.filter(function (u, i) { return backupM3u8Urls.indexOf(u) === i; });
       var backupResults = await Promise.all(backupM3u8Urls.map(fetchM3u8Content));
       var validBackups = backupResults.filter(Boolean);
+
       if (validBackups.length > 0) {
         var sourceLabel = 'backup-cdn';
         try {
           var domainMatch = backupM3u8Urls[0].match(/https?:\/\/([^\/]+)/);
           if (domainMatch) sourceLabel = domainMatch[1];
         } catch (e) {}
+
         res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
         res.setHeader('Cache-Control', 'public, s-maxage=30, max-age=0');
         res.setHeader('X-Source', sourceLabel);
@@ -188,8 +224,8 @@ export default async function handler(req, res) {
       }
     }
 
-    return res.status(200).send('// stream-unavailable');
+    return res.status(404).send('// stream-unavailable');
   } catch (err) {
-    return res.status(500).json({ error: err.message, stack: err.stack });
+    return res.status(500).json({ error: err.message || 'Internal server error', stack: err.stack });
   }
 }

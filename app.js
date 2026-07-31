@@ -200,7 +200,11 @@
   var healingInProgress = false;
   var forceRefresh = false;
   var prefetchInFlight = {};
-  var hoverTimers = {};
+  var prefetchPromises = {};
+  var tvDataCache = {};
+  var seasonEpisodes = {};
+  var lastProgressSave = 0;
+  var PLAYBACK_SAVE_INTERVAL = 5000;
 
   function initServerSelector() {
     if (document.getElementById('server-select')) {
@@ -470,7 +474,13 @@
 
     card.addEventListener('click', function () { openDetail(item, mediaType); });
     card.addEventListener('mouseenter', function () {
-      scheduleHoverPrefetch(item, mediaType === 'tv' ? 'tv' : 'movie');
+      scheduleHoverPrefetch(item, mediaType === 'tv' ? 'tv' : 'movie', card);
+    });
+    card.addEventListener('mouseleave', function () {
+      if (card._hoverTimer) { clearTimeout(card._hoverTimer); card._hoverTimer = null; }
+      var badge = card.querySelector('.card-warm-badge');
+      if (badge) badge.remove();
+      card.classList.remove('card--warming');
     });
     return card;
   }
