@@ -199,7 +199,16 @@ export default async function handler(req, res) {
     var titleMatch = best.title ? best.title.match(/\|\s*(.+)$/) : null;
     if (titleMatch) sourceName += ' - ' + titleMatch[1].trim();
 
-    return res.status(200).json({ hlsUrl: hlsUrl, source: sourceName });
+    var debugInfo = {
+      hash: hash,
+      torrentId: torrentId,
+      fileId: fileId,
+      needsTranscoding: stream.data.needs_transcoding,
+      isTranscoding: stream.data.is_transcoding,
+      isCached: isCached
+    };
+
+    return res.status(200).json({ hlsUrl: hlsUrl, source: sourceName, debug: debugInfo });
 
   } catch (err) {
     return res.status(500).json({ error: err.message || 'Internal error' });
