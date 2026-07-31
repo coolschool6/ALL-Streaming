@@ -752,11 +752,19 @@
       }, { once: true });
     } else if (typeof Hls !== 'undefined' && Hls.isSupported()) {
       hlsInstance = new Hls({
-        maxBufferLength: 30,
-        maxMaxBufferLength: 60,
-        enableWorker: true,
+        maxBufferLength: 10,
+        maxMaxBufferLength: 20,
+        maxBufferSize: 100 * 1000 * 1000,
+        maxBufferHole: 2,
+        enableWorker: false,
         lowLatencyMode: false,
-        backBufferLength: 15
+        backBufferLength: 10,
+        manifestLoadingMaxRetry: 2,
+        levelLoadingMaxRetry: 2,
+        fragLoadingMaxRetry: 3,
+        manifestLoadingRetryDelay: 500,
+        levelLoadingRetryDelay: 500,
+        fragLoadingRetryDelay: 500
       });
       hlsInstance.loadSource(sourceUrl);
       hlsInstance.attachMedia(video);
@@ -773,6 +781,8 @@
       });
       hlsInstance.on(Hls.Events.ERROR, function (e, data) {
         if (data.fatal) {
+          try { hlsInstance.destroy(); } catch (err) {}
+          hlsInstance = null;
           destroyCustomPlayer();
           fallbackToIframe();
         }
