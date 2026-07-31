@@ -4,12 +4,33 @@ var TORBOX_API = 'https://api.torbox.app/v1/api';
 var TORRENTIO = 'https://torrentio.strem.fun';
 
 var RESULT_CACHE = {};
-var RESULT_CACHE_TTL = 24 * 60 * 60 * 1000;
+var RESULT_CACHE_TTL = 3 * 60 * 60 * 1000;
 var RESULT_CACHE_MAX = 300;
 
 var UPSTASH_URL = process.env.UPSTASH_REDIS_REST_URL;
 var UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
-var UPSTASH_TTL = 24 * 60 * 60;
+var UPSTASH_TTL = 3 * 60 * 60;
+
+var TR_CACHE = {};
+var TR_CACHE_TTL = 24 * 60 * 60 * 1000;
+
+function trCacheKey(imdbId, season, episode) {
+  return 'tr:' + imdbId + ':' + season + ':' + episode;
+}
+
+function trCacheGet(key) {
+  var entry = TR_CACHE[key];
+  if (!entry) return null;
+  if (Date.now() - entry.t > TR_CACHE_TTL) {
+    delete TR_CACHE[key];
+    return null;
+  }
+  return entry.payload;
+}
+
+function trCacheSet(key, payload) {
+  TR_CACHE[key] = { t: Date.now(), payload: payload };
+}
 
 function upstashEnabled() {
   return !!(UPSTASH_URL && UPSTASH_TOKEN);
@@ -33,12 +54,12 @@ async function upstashGet(key) {
   } catch (e) { return null; }
 }
 
-async function upstashSet(key, value) {
+async function upstashSet(key, value, ttlSeconds) {
   if (!upstashEnabled()) return;
   try {
     var ctrl = new AbortController();
     var t = setTimeout(function() { ctrl.abort(); }, 2000);
-    await fetch(UPSTASH_URL + '/set/' + key + '?EX=' + UPSTASH_TTL, {
+    await fetch(UPSTASH_URL + '/set/' + key + '?EX=' + (ttlSeconds || UPSTASH_TTL), {
       method: 'POST',
       headers: {
         'Authorization': 'Bearer ' + UPSTASH_TOKEN,
@@ -178,18 +199,22 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Missing tmdbId or type' });
   }
 
-  var cacheKey = type + ':' + tmdbId + ':' + season + ':' + episode;
-  var cached = cacheGet(cacheKey);
-  if (cached) {
-    cached.cached = true;
-    return res.status(200).json(cached);
-  }
+  var refresh = req.query.refresh === '1' || req.query.refresh === 'true';
 
-  var shared = await upstashGet(cacheKey);
-  if (shared) {
-    cacheSet(cacheKey, shared);
-    shared.cached = 'shared';
-    return res.status(200).json(shared);
+  var cacheKey = type + ':' + tmdbId + ':' + season + ':' + episode;
+  if (!refresh) {
+    var cached = cacheGet(cacheKey);
+    if (cached) {
+      cached.cached = true;
+      return res.status(200).json(cached);
+    }
+
+    var shared = await upstashGet(cacheKey);
+    if (shared) {
+      cacheSet(cacheKey, shared);
+      shared.cached = 'shared';
+      return res.status(200).json(shared);
+    }
   }
 
   try {
@@ -218,16 +243,26 @@ export default async function handler(req, res) {
       ? TORRENTIO + '/stream/series/' + imdbId + ':' + season + ':' + episode + '.json'
       : TORRENTIO + '/stream/movie/' + imdbId + '.json';
 
-    var tr;
-    try {
-      var trRes = await fetch(torrentioUrl);
-      tr = await trRes.json();
-    } catch (e) {
-      return res.status(502).json({ error: 'Torrentio fetch failed' });
+    var trKey = trCacheKey(imdbId, season, episode);
+    var tr = trCacheGet(trKey) || await upstashGet(trKey);
+    var trFromCache = !!tr;
+
+    if (!tr) {
+      try {
+        var trRes = await fetch(torrentioUrl);
+        tr = await trRes.json();
+      } catch (e) {
+        return res.status(502).json({ error: 'Torrentio fetch failed' });
+      }
     }
 
     if (!tr || !tr.streams || tr.streams.length === 0) {
       return res.status(404).json({ error: 'No torrent streams found' });
+    }
+
+    if (!trFromCache) {
+      trCacheSet(trKey, tr);
+      await upstashSet(trKey, tr, 24 * 60 * 60);
     }
 
     var candidates = tr.streams

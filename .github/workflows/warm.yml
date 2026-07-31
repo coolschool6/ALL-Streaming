@@ -1,0 +1,26 @@
+name: warm-cache
+
+on:
+  schedule:
+    - cron: '0 */3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: warm-cache
+  cancel-in-progress: true
+
+jobs:
+  warm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      TARGET_URL: https://all-streaming-asfr.vercel.app
+      TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+      POOL_SIZE: '150'
+      CONCURRENCY: '3'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/warm.js

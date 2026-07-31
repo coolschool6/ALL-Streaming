@@ -198,6 +198,9 @@
   var customActive = false;
   var sourceCache = { url: null, hlsUrl: null, ready: false };
   var healingInProgress = false;
+  var forceRefresh = false;
+  var prefetchInFlight = {};
+  var hoverTimers = {};
 
   function initServerSelector() {
     if (document.getElementById('server-select')) {
@@ -466,6 +469,9 @@
     card.appendChild(info);
 
     card.addEventListener('click', function () { openDetail(item, mediaType); });
+    card.addEventListener('mouseenter', function () {
+      scheduleHoverPrefetch(item, mediaType === 'tv' ? 'tv' : 'movie');
+    });
     return card;
   }
 
@@ -485,6 +491,9 @@
     posterWrap.appendChild(img);
     card.appendChild(posterWrap);
     card.addEventListener('click', function () { openDetail(item, mediaType); });
+    card.addEventListener('mouseenter', function () {
+      scheduleHoverPrefetch(item, mediaType === 'tv' ? 'tv' : 'movie');
+    });
     return card;
   }
 
@@ -879,6 +888,7 @@
     }
     if (!healingInProgress && currentMedia) {
       healingInProgress = true;
+      forceRefresh = true;
       attemptCustomPlayer().then(function () {
         healingInProgress = false;
       }).catch(function () {
@@ -904,6 +914,7 @@
     var url = '/api/torbox-source?tmdbId=' + item.id + '&type=' + type;
     if (type === 'tv') url += '&season=' + sNum + '&episode=' + eNum;
 
+    if (prefetchInFlight[url]) return;
     var cached = streamCacheGet(type, item.id, sNum, eNum);
     if (cached) {
       sourceCache.hlsUrl = cached.url;
@@ -913,6 +924,7 @@
       return;
     }
 
+    prefetchInFlight[url] = true;
     fetch(url, { cache: 'no-store' }).then(function (r) {
       if (!r.ok) throw new Error('status ' + r.status);
       return r.json();
@@ -923,7 +935,22 @@
       sourceCache.url = url;
       sourceCache.ready = true;
       streamCacheSet(type, item.id, sNum, eNum, data.hlsUrl, data.source || 'TorBox');
-    }).catch(function () {});
+    }).catch(function () {}).finally(function () {
+      delete prefetchInFlight[url];
+    });
+  }
+
+  function scheduleHoverPrefetch(item, mediaType) {
+    if (!item || !item.id) return;
+    var cardKey = item.id;
+    if (hoverTimers[cardKey]) {
+      clearTimeout(hoverTimers[cardKey]);
+      hoverTimers[cardKey] = null;
+    }
+    hoverTimers[cardKey] = setTimeout(function () {
+      hoverTimers[cardKey] = null;
+      preFetchSource(item, mediaType);
+    }, 300);
   }
 
   function attemptCustomPlayer() {
@@ -935,13 +962,14 @@
       var eNum = episodeSelect ? episodeSelect.value || 1 : 1;
       var url = '/api/torbox-source?tmdbId=' + item.id + '&type=' + type;
       if (type === 'tv') url += '&season=' + sNum + '&episode=' + eNum;
+      if (forceRefresh) url += '&refresh=1';
 
-      if (sourceCache.url === url && sourceCache.ready && sourceCache.hlsUrl) {
+      if (!forceRefresh && sourceCache.url === url && sourceCache.ready && sourceCache.hlsUrl) {
         initCustomPlayer(sourceCache.hlsUrl, sourceCache.source);
         resolve(); return;
       }
 
-      var cached = streamCacheGet(type, item.id, sNum, eNum);
+      var cached = !forceRefresh ? streamCacheGet(type, item.id, sNum, eNum) : null;
       if (cached && cached.url) {
         sourceCache.hlsUrl = cached.url;
         sourceCache.source = cached.source || 'TorBox';
@@ -961,6 +989,7 @@
         return r.json();
       }).then(function (data) {
         if (!data.hlsUrl) throw new Error('No HLS URL');
+        forceRefresh = false;
         sourceCache.hlsUrl = data.hlsUrl;
         sourceCache.source = data.source || 'TorBox';
         sourceCache.url = url;
@@ -970,6 +999,7 @@
         resolve();
       }).catch(function (err) {
         clearTimeout(timeout);
+        forceRefresh = false;
         reject(err);
       });
     });
