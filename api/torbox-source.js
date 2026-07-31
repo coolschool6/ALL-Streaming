@@ -2,7 +2,13 @@
 var TMDB_KEY = process.env.TMDB_API_KEY || 'cd27a14dfc1752e04b474124a5af6d2b';
 var TORBOX_KEY = process.env.TORBOX_API_KEY;
 var TORBOX_API = 'https://api.torbox.app/v1/api';
-var TORRENTIO = 'https://torrentio.strem.fun';
+
+// Multiple Scraper Mirrors (Fallbacks if Torrentio blocks Vercel IPs)
+var SCRAPERS = [
+  'https://torrentio.strem.fun',
+  'https://knightcrawler.elfhosted.com',
+  'https://torrentio.elfhosted.com'
+];
 
 // Fetch Utility Wrappers
 async function tmdbFetch(path) {
@@ -21,7 +27,7 @@ async function torboxFetch(path) {
   if (!TORBOX_KEY) return null;
   try {
     var ctrl = new AbortController();
-    var t = setTimeout(function() { ctrl.abort(); }, 3000);
+    var t = setTimeout(function() { ctrl.abort(); }, 3500);
     var r = await fetch(TORBOX_API + path, {
       headers: { 'Authorization': 'Bearer ' + TORBOX_KEY },
       signal: ctrl.signal
@@ -36,7 +42,7 @@ async function torboxPost(path, body) {
   if (!TORBOX_KEY) return null;
   try {
     var ctrl = new AbortController();
-    var t = setTimeout(function() { ctrl.abort(); }, 3500);
+    var t = setTimeout(function() { ctrl.abort(); }, 4000);
     var r = await fetch(TORBOX_API + path, {
       method: 'POST',
       headers: {
@@ -71,6 +77,38 @@ function parseCodec(title) {
   return '';
 }
 
+// Scraper Fetch Function with Fallbacks & User-Agent Masking
+async function fetchStreamsFromScrapers(imdbId, type, season, episode) {
+  var subPath = type === 'tv'
+    ? '/stream/series/' + imdbId + ':' + season + ':' + episode + '.json'
+    : '/stream/movie/' + imdbId + '.json';
+
+  for (var i = 0; i < SCRAPERS.length; i++) {
+    var baseUrl = SCRAPERS[i];
+    try {
+      var ctrl = new AbortController();
+      var t = setTimeout(function() { ctrl.abort(); }, 3000);
+      var res = await fetch(baseUrl + subPath, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        },
+        signal: ctrl.signal
+      });
+      clearTimeout(t);
+
+      if (res.ok) {
+        var data = await res.json();
+        if (data && data.streams && data.streams.length > 0) {
+          return data.streams;
+        }
+      }
+    } catch (e) {
+      // Continue to next mirror on timeout/error
+    }
+  }
+  return null;
+}
+
 // Internal Logic Runner
 async function processStreamRequest(req) {
   var tmdbId = req.query.tmdbId;
@@ -98,35 +136,15 @@ async function processStreamRequest(req) {
     return { status: 404, payload: { error: 'Could not resolve IMDb ID from TMDB' } };
   }
 
-  // 2. Fetch Streams Live from Torrentio
-  var torrentioUrl = type === 'tv'
-    ? TORRENTIO + '/stream/series/' + imdbId + ':' + season + ':' + episode + '.json'
-    : TORRENTIO + '/stream/movie/' + imdbId + '.json';
+  // 2. Fetch Streams across Mirror Scrapers
+  var streams = await fetchStreamsFromScrapers(imdbId, type, season, episode);
 
-  var tr = null;
-  try {
-    var ctrl = new AbortController();
-    var t = setTimeout(function() { ctrl.abort(); }, 3500);
-    var trRes = await fetch(torrentioUrl, { signal: ctrl.signal });
-    clearTimeout(t);
-    
-    if (trRes.status === 429) {
-      return { status: 429, payload: { error: 'Torrentio rate limit reached.' } };
-    }
-    if (!trRes.ok) {
-      return { status: 404, payload: { error: 'Torrent search failed.' } };
-    }
-    tr = await trRes.json();
-  } catch (e) {
-    return { status: 404, payload: { error: 'Torrent search connection timed out.' } };
-  }
-
-  if (!tr || !tr.streams || tr.streams.length === 0) {
-    return { status: 404, payload: { error: 'No torrent streams available.' } };
+  if (!streams || streams.length === 0) {
+    return { status: 404, payload: { error: 'Torrent search connection timed out or no streams available.' } };
   }
 
   // 3. Clean & Sort Candidates
-  var candidates = tr.streams
+  var candidates = streams
     .filter(function(s) { return s && s.infoHash; })
     .map(function(s) {
       s.cleanHash = String(s.infoHash).trim().toLowerCase();
@@ -144,7 +162,7 @@ async function processStreamRequest(req) {
     return { status: 404, payload: { error: 'No valid torrent hashes found.' } };
   }
 
-  // 4. Check TorBox Cache for Top 25 Candidates in One Batch Call
+  // 4. Check TorBox Cache for Top 25 Candidates
   var topCandidates = candidates.slice(0, 25);
   var hashList = topCandidates.map(function(c) { return c.cleanHash; }).join(',');
   
@@ -211,7 +229,7 @@ async function processStreamRequest(req) {
     fileId = videoFiles[0].id;
   }
 
-  // 6. Check existing user transfers FIRST to avoid duplicate errors
+  // 6. Check existing user transfers FIRST
   var torrentId = null;
   var mylist = await torboxFetch('/torrents/mylist');
   
@@ -274,7 +292,7 @@ async function processStreamRequest(req) {
   };
 }
 
-// Exported Handler With Strict Vercel 8.5s Timeout Guard
+// Exported Handler With Strict Vercel Timeout Guard
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
