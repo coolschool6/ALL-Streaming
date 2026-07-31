@@ -3,6 +3,26 @@ var TORBOX_KEY = process.env.TORBOX_API_KEY;
 var TORBOX_API = 'https://api.torbox.app/v1/api';
 var TORRENTIO = 'https://torrentio.strem.fun';
 
+var RESULT_CACHE = {};
+var RESULT_CACHE_TTL = 60 * 60 * 1000;
+var RESULT_CACHE_MAX = 200;
+
+function cacheGet(key) {
+  var entry = RESULT_CACHE[key];
+  if (!entry) return null;
+  if (Date.now() - entry.t > RESULT_CACHE_TTL) {
+    delete RESULT_CACHE[key];
+    return null;
+  }
+  return entry.payload;
+}
+
+function cacheSet(key, payload) {
+  var keys = Object.keys(RESULT_CACHE);
+  if (keys.length >= RESULT_CACHE_MAX) delete RESULT_CACHE[keys[0]];
+  RESULT_CACHE[key] = { t: Date.now(), payload: payload };
+}
+
 async function tmdbFetch(path) {
   try {
     var r = await fetch('https://api.themoviedb.org/3' + path + '?api_key=' + TMDB_KEY + '&language=en');
@@ -94,6 +114,13 @@ export default async function handler(req, res) {
 
   if (!tmdbId || !type) {
     return res.status(400).json({ error: 'Missing tmdbId or type' });
+  }
+
+  var cacheKey = type + ':' + tmdbId + ':' + season + ':' + episode;
+  var cached = cacheGet(cacheKey);
+  if (cached) {
+    cached.cached = true;
+    return res.status(200).json(cached);
   }
 
   try {
@@ -252,7 +279,10 @@ export default async function handler(req, res) {
       candidatesChecked: ci + 1
     };
 
-    return res.status(200).json({ hlsUrl: hlsUrl, source: sourceName, debug: debugInfo });
+    var payload = { hlsUrl: hlsUrl, source: sourceName, debug: debugInfo };
+    cacheSet(cacheKey, payload);
+
+    return res.status(200).json(payload);
 
   } catch (err) {
     return res.status(500).json({ error: err.message || 'Internal error' });

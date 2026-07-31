@@ -829,7 +829,7 @@
   }
 
   function fallbackToIframe() {
-    showPlayerError('Custom player failed. Select a server from the dropdown.');
+    showPlayerError('Stream failed to play. Select a server from the dropdown.');
   }
 
   function clearSourceCache() {
@@ -870,8 +870,9 @@
         resolve(); return;
       }
 
+      showLoader(true, 'Fetching stream source (up to ~1.5 min)...');
       var controller = new AbortController();
-      var timeout = setTimeout(function () { controller.abort(); }, 8000);
+      var timeout = setTimeout(function () { controller.abort(); }, 90000);
 
       fetch(url, { signal: controller.signal, cache: 'no-store' }).then(function (r) {
         clearTimeout(timeout);
@@ -885,9 +886,9 @@
         sourceCache.ready = true;
         initCustomPlayer(data.hlsUrl, data.source || 'TorBox');
         resolve();
-      }).catch(function () {
+      }).catch(function (err) {
         clearTimeout(timeout);
-        reject();
+        reject(err);
       });
     });
   }
@@ -908,7 +909,9 @@
       setupTVControls(item.id);
     } else {
       tvControls.style.display = 'none';
-      attemptCustomPlayer().catch(function () { showPlayerError('Custom player failed. Use server selector.'); });
+      attemptCustomPlayer().catch(function (err) {
+        showPlayerError('Could not load custom stream' + (err && err.message ? ' (' + err.message + ')' : '') + '. Use the server selector below.');
+      });
     }
     playerModal.classList.add('active');
     document.body.style.overflow = 'hidden';
@@ -972,7 +975,9 @@
         opt.textContent = 'E' + ep.episode_number + ' - ' + ep.name;
         episodeSelect.appendChild(opt);
       });
-      attemptCustomPlayer().catch(function () { showPlayerError('Custom player failed. Use server selector.'); });
+      attemptCustomPlayer().catch(function (err) {
+        showPlayerError('Could not load custom stream' + (err && err.message ? ' (' + err.message + ')' : '') + '. Use the server selector below.');
+      });
     });
   }
 
@@ -1057,7 +1062,9 @@
         destroyCustomPlayer();
         showLoader(true, 'Loading stream...');
         playerIframe.src = 'about:blank';
-        attemptCustomPlayer().catch(function () { showPlayerError('Custom player failed. Use server selector.'); });
+        attemptCustomPlayer().catch(function (err) {
+          showPlayerError('Could not load custom stream' + (err && err.message ? ' (' + err.message + ')' : '') + '. Use the server selector below.');
+        });
       }
     });
     playerClose.addEventListener('click', closePlayer);
