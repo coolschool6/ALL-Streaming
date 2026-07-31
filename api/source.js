@@ -1,49 +1,56 @@
 var DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbxENxJOCkcRQsYYGa-zGFwjz7R6-JRGHB5WP4lFqszzlQiFmLXT6IJihUGLmtxhBuPa/exec';
 var GAS_URL = process.env.GAS_URL || DEFAULT_GAS_URL;
 
-function gasFetch(url) {
+function isUrl(s) {
+  return s && typeof s === 'string' && (s.startsWith('http://') || s.startsWith('https://'));
+}
+
+async function gasFetch(url) {
   var ctrl = new AbortController();
-  var t = setTimeout(function() { ctrl.abort(); }, 6000);
-  return fetch(GAS_URL + '?action=fetch_url&url=' + encodeURIComponent(url), { signal: ctrl.signal })
-    .then(function (r) { clearTimeout(t); return r.json(); })
-    .then(function (d) {
-      if (d.error) throw new Error(d.error);
-      return d;
-    })
-    .catch(function (err) {
-      clearTimeout(t);
-      throw err;
+  var t = setTimeout(function() { ctrl.abort(); }, 9000);
+  try {
+    var r = await fetch(GAS_URL + '?action=fetch_url&url=' + encodeURIComponent(url), { 
+      signal: ctrl.signal,
+      redirect: 'follow'
     });
+    clearTimeout(t);
+    var d = await r.json();
+    if (d.error) return '';
+    return d.content || '';
+  } catch (err) {
+    clearTimeout(t);
+    return '';
+  }
 }
 
 async function smartFetch(url) {
   var controller = new AbortController();
-  var id = setTimeout(function () { controller.abort(); }, 3500);
+  var id = setTimeout(function () { controller.abort(); }, 5000);
+  
+  var reqHeaders = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+    'Referer': 'https://play.xpass.top/',
+    'Origin': 'https://play.xpass.top'
+  };
+
   try {
     var direct = await fetch(url, {
       signal: controller.signal,
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }
+      headers: reqHeaders
     });
     clearTimeout(id);
     var text = await direct.text();
-    if (text.includes('Just a moment') || text.includes('challenges.cloudflare')) {
-      var viaGas = await gasFetch(url);
-      return viaGas.content || '';
+    
+    // Cloudflare check
+    if (!text || text.includes('Just a moment') || text.includes('challenges.cloudflare')) {
+      return await gasFetch(url);
     }
     return text;
   } catch (e) {
     clearTimeout(id);
-    try {
-      var viaGasFallback = await gasFetch(url);
-      return viaGasFallback.content || '';
-    } catch (gasErr) {
-      return '';
-    }
+    return await gasFetch(url);
   }
-}
-
-function isUrl(s) {
-  return s && typeof s === 'string' && (s.startsWith('http://') || s.startsWith('https://'));
 }
 
 async function fetchWithTimeout(url, ms) {
@@ -52,23 +59,20 @@ async function fetchWithTimeout(url, ms) {
   try {
     var r = await fetch(url, {
       signal: controller.signal,
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+      headers: { 
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Referer': 'https://play.xpass.top/' 
+      }
     });
     clearTimeout(id);
     var t = await r.text();
-    if (t.includes('Just a moment') || t.includes('challenges.cloudflare')) {
-      var g = await gasFetch(url);
-      return g.content || '';
+    if (!t || t.includes('Just a moment') || t.includes('challenges.cloudflare')) {
+      return await gasFetch(url);
     }
     return t;
   } catch (e) {
     clearTimeout(id);
-    try {
-      var fallbackG = await gasFetch(url);
-      return fallbackG.content || '';
-    } catch (err) {
-      return '';
-    }
+    return await gasFetch(url);
   }
 }
 
@@ -86,7 +90,6 @@ function rewriteM3u8(content, sourceUrl) {
       result.push(linesArr[k]); 
       continue; 
     }
-    // Don't re-proxy if link already contains proxy call
     if (t.includes('/api/proxy?url=')) {
       result.push(t);
       continue;
@@ -102,7 +105,7 @@ function rewriteM3u8(content, sourceUrl) {
 }
 
 async function fetchM3u8Content(m3u8Url) {
-  var output = await fetchWithTimeout(m3u8Url, 3500);
+  var output = await fetchWithTimeout(m3u8Url, 4500);
   if (!output) return null;
   var resolvedUrl = m3u8Url;
   var depth = 0;
@@ -110,7 +113,7 @@ async function fetchM3u8Content(m3u8Url) {
   while (output.indexOf('#EXTM3U') === -1 && depth < 3) {
     var bareUrl = output.trim();
     if (!isUrl(bareUrl)) break;
-    output = await fetchWithTimeout(bareUrl, 3500);
+    output = await fetchWithTimeout(bareUrl, 4500);
     if (!output) break;
     resolvedUrl = bareUrl;
     depth++;
@@ -130,7 +133,7 @@ async function fetchM3u8Content(m3u8Url) {
 
 async function tryGetM3u8FromPlaylist(playlistUrl) {
   try {
-    var plText = await fetchWithTimeout(playlistUrl, 3500);
+    var plText = await fetchWithTimeout(playlistUrl, 4500);
     if (!plText) return null;
     var plData = JSON.parse(plText);
     var sources = plData.playlist && plData.playlist[0] ? plData.playlist[0].sources : [];
@@ -169,7 +172,8 @@ export default async function handler(req, res) {
 
     var html = await smartFetch(xpassUrl);
     if (!html) {
-      return res.status(502).json({ error: 'Failed to retrieve source page content.' });
+      // Return 404 instead of 502 so the UI knows no stream was found rather than throwing a server error
+      return res.status(404).json({ error: 'Source offline or unreachable' });
     }
 
     var match = html.match(/"playlist":"([^"]+)"/);
@@ -224,8 +228,8 @@ export default async function handler(req, res) {
       }
     }
 
-    return res.status(404).send('// stream-unavailable');
+    return res.status(404).json({ error: 'Stream unavailable for this title' });
   } catch (err) {
-    return res.status(500).json({ error: err.message || 'Internal server error', stack: err.stack });
+    return res.status(404).json({ error: 'Stream lookup failed' });
   }
 }
