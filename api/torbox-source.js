@@ -205,7 +205,9 @@ export default async function handler(req, res) {
       fileId: fileId,
       needsTranscoding: stream.data.needs_transcoding,
       isTranscoding: stream.data.is_transcoding,
-      isCached: isCached
+      isCached: isCached,
+      serverTime: Date.now(),
+      streamUrl: streamUrl
     };
 
     return res.status(200).json({ hlsUrl: hlsUrl, source: sourceName, debug: debugInfo });
