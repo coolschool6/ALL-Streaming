@@ -843,7 +843,7 @@
     clearSourceCache();
     var url = '/api/torbox-source?tmdbId=' + item.id + '&type=' + type;
     if (type === 'tv' && season && episode) url += '&season=' + season + '&episode=' + episode;
-    fetch(url).then(function (r) {
+    fetch(url, { cache: 'no-store' }).then(function (r) {
       if (!r.ok) throw new Error('status ' + r.status);
       return r.json();
     }).then(function (data) {
@@ -873,7 +873,7 @@
       var controller = new AbortController();
       var timeout = setTimeout(function () { controller.abort(); }, 8000);
 
-      fetch(url, { signal: controller.signal }).then(function (r) {
+      fetch(url, { signal: controller.signal, cache: 'no-store' }).then(function (r) {
         clearTimeout(timeout);
         if (!r.ok) throw new Error('status ' + r.status);
         return r.json();
