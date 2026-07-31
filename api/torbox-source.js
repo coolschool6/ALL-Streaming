@@ -4,8 +4,11 @@ var TORBOX_API = 'https://api.torbox.app/v1/api';
 var TORRENTIO = 'https://torrentio.strem.fun';
 
 var RESULT_CACHE = {};
-var RESULT_CACHE_TTL = 60 * 60 * 1000;
-var RESULT_CACHE_MAX = 200;
+var RESULT_CACHE_TTL = 24 * 60 * 60 * 1000;
+var RESULT_CACHE_MAX = 300;
+
+var IMDB_CACHE = {};
+var IMDB_CACHE_TTL = 24 * 60 * 60 * 1000;
 
 function cacheGet(key) {
   var entry = RESULT_CACHE[key];
@@ -21,6 +24,21 @@ function cacheSet(key, payload) {
   var keys = Object.keys(RESULT_CACHE);
   if (keys.length >= RESULT_CACHE_MAX) delete RESULT_CACHE[keys[0]];
   RESULT_CACHE[key] = { t: Date.now(), payload: payload };
+}
+
+function imdbCacheGet(tmdbId) {
+  var entry = IMDB_CACHE[tmdbId];
+  if (!entry) return null;
+  if (Date.now() - entry.t > IMDB_CACHE_TTL) {
+    delete IMDB_CACHE[tmdbId];
+    return null;
+  }
+  return entry.imdbId;
+}
+
+function imdbCacheSet(tmdbId, imdbId) {
+  if (!imdbId) return;
+  IMDB_CACHE[tmdbId] = { t: Date.now(), imdbId: imdbId };
 }
 
 async function tmdbFetch(path) {
@@ -124,9 +142,9 @@ export default async function handler(req, res) {
   }
 
   try {
-    var imdbId;
+    var imdbId = imdbCacheGet(tmdbId);
 
-    if (type === 'tv') {
+    if (!imdbId && type === 'tv') {
       var ext = await tmdbFetch('/tv/' + tmdbId + '/external_ids');
       imdbId = ext ? ext.imdb_id : null;
       if (!imdbId) {
@@ -135,10 +153,11 @@ export default async function handler(req, res) {
           imdbId = tvData.external_ids.imdb_id;
         }
       }
-    } else {
+    } else if (!imdbId) {
       var movie = await tmdbFetch('/movie/' + tmdbId);
       imdbId = movie ? movie.imdb_id : null;
     }
+    imdbCacheSet(tmdbId, imdbId);
 
     if (!imdbId) {
       return res.status(404).json({ error: 'Could not resolve IMDb ID' });
@@ -176,28 +195,61 @@ export default async function handler(req, res) {
     var isCached = false;
     var cachedFiles = [];
     var chosenCodec = '';
+    var candidatesChecked = 0;
 
-    for (var ci = 0; ci < candidates.length; ci++) {
-      var cand = candidates[ci];
-      var candHash = cand.infoHash;
-      var hashResult = await torboxFetch('/torrents/checkcached?hash=' + candHash + '&format=object&list_files=true');
+    function applyCached(cand, candFiles) {
+      best = cand;
+      bestQ = parseQuality(cand.title);
+      hash = cand.infoHash;
+      isCached = true;
+      cachedFiles = candFiles;
+      chosenCodec = parseCodec(cand.title);
+    }
 
-      var candCached = false;
-      var candFiles = [];
-      if (hashResult && hashResult.success && hashResult.data && typeof hashResult.data === 'object' && !Array.isArray(hashResult.data)) {
-        var hashData = hashResult.data[candHash];
-        if (hashData) candCached = true;
-        if (hashData && hashData.files) candFiles = hashData.files;
-      }
+    var PARALLEL = 10;
+    var batch = candidates.slice(0, PARALLEL);
 
-      if (candCached) {
-        best = cand;
-        bestQ = parseQuality(cand.title);
-        hash = candHash;
-        isCached = true;
-        cachedFiles = candFiles;
-        chosenCodec = parseCodec(cand.title);
+    var batchResults = await Promise.all(batch.map(function (cand) {
+      return torboxFetch('/torrents/checkcached?hash=' + cand.infoHash + '&format=object&list_files=true')
+        .then(function (hashResult) {
+          var candCached = false;
+          var candFiles = [];
+          if (hashResult && hashResult.success && hashResult.data && typeof hashResult.data === 'object' && !Array.isArray(hashResult.data)) {
+            var hashData = hashResult.data[cand.infoHash];
+            if (hashData) candCached = true;
+            if (hashData && hashData.files) candFiles = hashData.files;
+          }
+          return { cand: cand, candCached: candCached, candFiles: candFiles };
+        })
+        .catch(function () { return { cand: cand, candCached: false, candFiles: [] }; });
+    }));
+
+    for (var bi = 0; bi < batchResults.length; bi++) {
+      if (batchResults[bi].candCached) {
+        applyCached(batchResults[bi].cand, batchResults[bi].candFiles);
+        candidatesChecked = bi + 1;
         break;
+      }
+    }
+
+    if (!isCached) {
+      for (var ci = PARALLEL; ci < candidates.length; ci++) {
+        var cand = candidates[ci];
+        var hashResult = await torboxFetch('/torrents/checkcached?hash=' + cand.infoHash + '&format=object&list_files=true');
+
+        var candCached = false;
+        var candFiles = [];
+        if (hashResult && hashResult.success && hashResult.data && typeof hashResult.data === 'object' && !Array.isArray(hashResult.data)) {
+          var hashData = hashResult.data[cand.infoHash];
+          if (hashData) candCached = true;
+          if (hashData && hashData.files) candFiles = hashData.files;
+        }
+
+        if (candCached) {
+          applyCached(cand, candFiles);
+          candidatesChecked = ci + 1;
+          break;
+        }
       }
     }
 
@@ -276,7 +328,7 @@ export default async function handler(req, res) {
       isCached: isCached,
       serverTime: Date.now(),
       streamUrl: streamUrl,
-      candidatesChecked: ci + 1
+      candidatesChecked: candidatesChecked
     };
 
     var payload = { hlsUrl: hlsUrl, source: sourceName, debug: debugInfo };

@@ -197,6 +197,7 @@
   var plyrInstance = null;
   var customActive = false;
   var sourceCache = { url: null, hlsUrl: null, ready: false };
+  var healingInProgress = false;
 
   function initServerSelector() {
     if (document.getElementById('server-select')) {
@@ -567,6 +568,7 @@
 
       renderSeasonEpisodes(item.id, 1);
       renderSimilarShows(item.id);
+      preFetchSource(item, 'tv', 1, 1);
     });
   }
 
@@ -668,6 +670,10 @@
       showSynopsis.innerHTML = '';
       showSynopsis.appendChild(synLabel);
       showSynopsis.appendChild(synText);
+
+      if (episodes.length > 0 && currentShowData) {
+        preFetchSource(currentShowData, 'tv', seasonNum, episodes[0].episode_number);
+      }
     });
   }
 
@@ -747,18 +753,17 @@
         video.play().catch(function () {});
       }, { once: true });
       video.addEventListener('error', function () {
-        destroyCustomPlayer();
-        fallbackToIframe();
+        handleCustomPlayerFailure();
       }, { once: true });
     } else if (typeof Hls !== 'undefined' && Hls.isSupported()) {
       hlsInstance = new Hls({
-        maxBufferLength: 10,
-        maxMaxBufferLength: 20,
-        maxBufferSize: 100 * 1000 * 1000,
+        maxBufferLength: 30,
+        maxMaxBufferLength: 90,
+        maxBufferSize: 200 * 1000 * 1000,
         maxBufferHole: 2,
-        enableWorker: false,
+        enableWorker: true,
         lowLatencyMode: false,
-        backBufferLength: 10,
+        backBufferLength: 20,
         manifestLoadingMaxRetry: 2,
         levelLoadingMaxRetry: 2,
         fragLoadingMaxRetry: 3,
@@ -783,8 +788,7 @@
         if (data.fatal) {
           try { hlsInstance.destroy(); } catch (err) {}
           hlsInstance = null;
-          destroyCustomPlayer();
-          fallbackToIframe();
+          handleCustomPlayerFailure();
         }
       });
     } else {
@@ -832,6 +836,60 @@
     showPlayerError('Stream failed to play. Select a server from the dropdown.');
   }
 
+  var STREAM_CACHE_TTL = 24 * 60 * 60 * 1000;
+
+  function streamCacheKey(type, id, season, episode) {
+    return 'asfr_hls_' + type + '_' + id + '_' + (season || 1) + '_' + (episode || 1);
+  }
+
+  function streamCacheGet(type, id, season, episode) {
+    try {
+      var raw = localStorage.getItem(streamCacheKey(type, id, season, episode));
+      if (!raw) return null;
+      var entry = JSON.parse(raw);
+      if (!entry || !entry.url || !entry.t) return null;
+      if (Date.now() - entry.t > STREAM_CACHE_TTL) {
+        localStorage.removeItem(streamCacheKey(type, id, season, episode));
+        return null;
+      }
+      return entry;
+    } catch (e) { return null; }
+  }
+
+  function streamCacheSet(type, id, season, episode, url, source) {
+    try {
+      localStorage.setItem(streamCacheKey(type, id, season, episode), JSON.stringify({
+        url: url,
+        source: source || 'TorBox',
+        t: Date.now()
+      }));
+    } catch (e) {}
+  }
+
+  function streamCacheRemove(type, id, season, episode) {
+    try { localStorage.removeItem(streamCacheKey(type, id, season, episode)); } catch (e) {}
+  }
+
+  function handleCustomPlayerFailure() {
+    if (currentMedia) {
+      streamCacheRemove(currentMedia.type, currentMedia.item.id,
+        seasonSelect ? seasonSelect.value || 1 : 1,
+        episodeSelect ? episodeSelect.value || 1 : 1);
+      clearSourceCache();
+    }
+    if (!healingInProgress && currentMedia) {
+      healingInProgress = true;
+      attemptCustomPlayer().then(function () {
+        healingInProgress = false;
+      }).catch(function () {
+        healingInProgress = false;
+        fallbackToIframe();
+      });
+    } else {
+      fallbackToIframe();
+    }
+  }
+
   function clearSourceCache() {
     sourceCache.url = null;
     sourceCache.hlsUrl = null;
@@ -840,9 +898,21 @@
   }
 
   function preFetchSource(item, type, season, episode) {
-    clearSourceCache();
+    if (!item || !item.id) return;
+    var sNum = season || 1;
+    var eNum = episode || 1;
     var url = '/api/torbox-source?tmdbId=' + item.id + '&type=' + type;
-    if (type === 'tv' && season && episode) url += '&season=' + season + '&episode=' + episode;
+    if (type === 'tv') url += '&season=' + sNum + '&episode=' + eNum;
+
+    var cached = streamCacheGet(type, item.id, sNum, eNum);
+    if (cached) {
+      sourceCache.hlsUrl = cached.url;
+      sourceCache.source = cached.source || 'TorBox';
+      sourceCache.url = url;
+      sourceCache.ready = true;
+      return;
+    }
+
     fetch(url, { cache: 'no-store' }).then(function (r) {
       if (!r.ok) throw new Error('status ' + r.status);
       return r.json();
@@ -852,6 +922,7 @@
       sourceCache.source = data.source || 'TorBox';
       sourceCache.url = url;
       sourceCache.ready = true;
+      streamCacheSet(type, item.id, sNum, eNum, data.hlsUrl, data.source || 'TorBox');
     }).catch(function () {});
   }
 
@@ -870,6 +941,16 @@
         resolve(); return;
       }
 
+      var cached = streamCacheGet(type, item.id, sNum, eNum);
+      if (cached && cached.url) {
+        sourceCache.hlsUrl = cached.url;
+        sourceCache.source = cached.source || 'TorBox';
+        sourceCache.url = url;
+        sourceCache.ready = true;
+        initCustomPlayer(cached.url, cached.source || 'TorBox');
+        resolve(); return;
+      }
+
       showLoader(true, 'Fetching stream source (up to ~1.5 min)...');
       var controller = new AbortController();
       var timeout = setTimeout(function () { controller.abort(); }, 90000);
@@ -884,6 +965,7 @@
         sourceCache.source = data.source || 'TorBox';
         sourceCache.url = url;
         sourceCache.ready = true;
+        streamCacheSet(type, item.id, sNum, eNum, data.hlsUrl, data.source || 'TorBox');
         initCustomPlayer(data.hlsUrl, data.source || 'TorBox');
         resolve();
       }).catch(function (err) {
