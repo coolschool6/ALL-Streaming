@@ -136,16 +136,20 @@ export default async function handler(req, res) {
     }
 
     var fileId = 0;
-    if (type === 'tv' && cachedFiles.length > 0) {
+    var videoFiles = cachedFiles.filter(function(f) { return f.mimetype && f.mimetype.indexOf('video/') === 0; });
+    if (videoFiles.length === 0) videoFiles = cachedFiles;
+
+    if (type === 'tv' && videoFiles.length > 0) {
       var epStr = 'S' + String(season).padStart(2, '0') + 'E' + String(episode).padStart(2, '0');
       var matched = null;
-      for (var fi = 0; fi < cachedFiles.length; fi++) {
-        var f = cachedFiles[fi];
+      for (var fi = 0; fi < videoFiles.length; fi++) {
+        var f = videoFiles[fi];
         if (f.name && f.name.toUpperCase().indexOf(epStr) !== -1) { matched = f; break; }
       }
       if (matched) fileId = matched.id;
-    } else if (cachedFiles.length > 0) {
-      fileId = cachedFiles[0].id;
+      else fileId = videoFiles[0].id;
+    } else if (videoFiles.length > 0) {
+      fileId = videoFiles[0].id;
     }
 
     var magnet = 'magnet:?xt=urn:btih:' + hash;
