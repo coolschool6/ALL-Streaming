@@ -7,6 +7,7 @@ var UPSTASH_URL = process.env.UPSTASH_REDIS_REST_URL;
 var UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 var UPSTASH_RESULT_TTL = 3 * 60 * 60;
 var UPSTASH_TR_TTL = 24 * 60 * 60;
+var CACHE_VERSION = 'v2';
 
 // ---- In-memory caches (per-instance, best-effort) ----
 var RESULT_CACHE = {};
@@ -88,6 +89,14 @@ function trCacheGet(key) {
 
 function trCacheSet(key, payload) {
   TR_CACHE[key] = { t: Date.now(), payload: payload };
+}
+
+function buildCacheKey(type, tmdbId, season, episode) {
+  return CACHE_VERSION + ':' + type + ':' + tmdbId + ':' + (season || '1') + ':' + (episode || '1');
+}
+
+function buildTrKey(imdbId, season, episode) {
+  return CACHE_VERSION + ':tr:' + imdbId + ':' + (season || '1') + ':' + (episode || '1');
 }
 
 // ---- Upstash shared cache (keeps results warm between users) ----
@@ -703,7 +712,7 @@ async function processStreamRequest(req) {
     return { status: 404, payload: { error: 'Could not resolve IMDb ID from TMDB', imdbId: null } };
   }
 
-  var trKey = 'tr:' + imdbId + ':' + season + ':' + episode;
+  var trKey = buildTrKey(imdbId, season, episode);
   var provided = extractCandidates(req);
 
   // 2. Use hashes the client scraped in its own browser, or a shared cache
@@ -799,7 +808,7 @@ export default async function handler(req, res) {
     return res.status(pollResult.status).json(pollResult.payload);
   }
 
-  var cacheKey = type + ':' + tmdbId + ':' + season + ':' + episode;
+  var cacheKey = buildCacheKey(type, tmdbId, season, episode);
   var refresh = req.query.refresh === '1' || req.query.refresh === 'true';
 
   if (!refresh) {

@@ -1017,9 +1017,33 @@
   }
 
   var STREAM_CACHE_TTL = 24 * 60 * 60 * 1000;
+  var STREAM_CACHE_VERSION = 'v2';
+  var STREAM_CACHE_VERSION_KEY = 'asfr_stream_cache_version';
+
+  function clearLegacyStreamCache() {
+    try {
+      var keys = [];
+      for (var i = 0; i < localStorage.length; i++) {
+        var key = localStorage.key(i);
+        if (key && key.indexOf('asfr_hls_') === 0) keys.push(key);
+      }
+      for (var j = 0; j < keys.length; j++) localStorage.removeItem(keys[j]);
+      localStorage.setItem(STREAM_CACHE_VERSION_KEY, STREAM_CACHE_VERSION);
+    } catch (e) {}
+  }
+
+  function ensureStreamCacheFresh() {
+    try {
+      if (localStorage.getItem(STREAM_CACHE_VERSION_KEY) !== STREAM_CACHE_VERSION) {
+        clearLegacyStreamCache();
+      }
+    } catch (e) {
+      clearLegacyStreamCache();
+    }
+  }
 
   function streamCacheKey(type, id, season, episode) {
-    return 'asfr_hls_' + type + '_' + id + '_' + (season || 1) + '_' + (episode || 1);
+    return 'asfr_hls_' + STREAM_CACHE_VERSION + '_' + type + '_' + id + '_' + (season || 1) + '_' + (episode || 1);
   }
 
   function streamCacheGet(type, id, season, episode) {
@@ -1693,6 +1717,7 @@
 
   function init() {
     loading.style.display = 'flex';
+    ensureStreamCacheFresh();
 
     var langSelect = document.getElementById('lang-select');
     if (langSelect) {
