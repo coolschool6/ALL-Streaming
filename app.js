@@ -7,6 +7,26 @@
 
   var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxQRgoIOUUJaJP0WKFaFFs4y4UVyhMh853GJPyO1CO4TDfag9H8cduAS_05ffrxLaxz/exec';
   var VERIFY_INTERVAL_MS = 15 * 60 * 1000;
+  var expiryTimerId = null;
+
+  function clearExpiryTimer() {
+    if (expiryTimerId) {
+      clearTimeout(expiryTimerId);
+      expiryTimerId = null;
+    }
+  }
+
+  function scheduleExpiryTimer(expiryTime) {
+    clearExpiryTimer();
+    var expiryMs = parseInt(expiryTime, 10);
+    if (!expiryMs || isNaN(expiryMs)) return;
+    var delay = Math.max(0, expiryMs - Date.now() + 1000);
+    expiryTimerId = setTimeout(function () {
+      clearExpiryTimer();
+      checkPaywall();
+      backgroundVerifyKey();
+    }, delay);
+  }
 
   function checkPaywall() {
     var overlay = document.getElementById('paywall-overlay');
@@ -18,6 +38,7 @@
     var now = Date.now();
 
     if (expiryTime && now < parseInt(expiryTime, 10)) {
+      scheduleExpiryTimer(expiryTime);
       overlay.style.display = 'none';
       if (badge && daysLeftEl) {
         var timeLeftMs = parseInt(expiryTime, 10) - now;
@@ -26,6 +47,7 @@
         badge.style.display = 'flex';
       }
     } else {
+      clearExpiryTimer();
       localStorage.removeItem('asfr_access_key');
       localStorage.removeItem('asfr_expiry_time');
       overlay.style.display = 'flex';
@@ -45,6 +67,7 @@
               if (actData.status === 'activated' || actData.status === 'already_activated') {
                 localStorage.setItem('asfr_access_key', keyValue);
                 localStorage.setItem('asfr_expiry_time', actData.expiresAt.toString());
+                scheduleExpiryTimer(actData.expiresAt);
                 return { success: true, expiresAt: actData.expiresAt };
               }
               return { success: false, error: 'Activation failed' };
@@ -52,6 +75,7 @@
         } else if (data.status === 'active') {
           localStorage.setItem('asfr_access_key', keyValue);
           localStorage.setItem('asfr_expiry_time', data.expiresAt.toString());
+          scheduleExpiryTimer(data.expiresAt);
           return { success: true, expiresAt: data.expiresAt, daysRemaining: data.daysRemaining };
         } else if (data.status === 'expired') {
           return { success: false, error: 'This key has expired.' };
@@ -74,6 +98,7 @@
       .then(function (res) { return res.json(); })
       .then(function (data) {
         if (data.status === 'expired' || data.status === 'invalid') {
+          clearExpiryTimer();
           localStorage.removeItem('asfr_access_key');
           localStorage.removeItem('asfr_expiry_time');
           localStorage.removeItem('asfr_last_verify');
@@ -81,6 +106,7 @@
         } else if (data.status === 'active') {
           localStorage.setItem('asfr_expiry_time', data.expiresAt.toString());
           localStorage.setItem('asfr_last_verify', now.toString());
+          scheduleExpiryTimer(data.expiresAt);
           checkPaywall();
         }
       })
@@ -130,6 +156,12 @@
     checkPaywall();
     backgroundVerifyKey();
     setInterval(backgroundVerifyKey, VERIFY_INTERVAL_MS);
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible') {
+        checkPaywall();
+        backgroundVerifyKey();
+      }
+    });
     setupPaywallEvents();
 
     var logoutBtn = document.getElementById('btn-logout');
