@@ -2,10 +2,13 @@ import { createServer } from 'http';
 import { readFile } from 'fs/promises';
 import { join, extname } from 'path';
 import { fileURLToPath } from 'url';
+import { loadEnv } from './load-env.mjs';
 
 const root = join(fileURLToPath(new URL('..', import.meta.url)));
 const port = Number(process.env.PORT || 3000);
 const apiModules = {};
+
+loadEnv();
 const mimeTypes = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'application/javascript; charset=utf-8',
