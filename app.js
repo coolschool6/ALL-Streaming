@@ -147,13 +147,6 @@
   var IMG = 'https://image.tmdb.org/t/p/';
   var currentLang = localStorage.getItem('asfr_lang') || 'en';
 
-  var SERVERS = [
-    { name: 'Server 1 (VidSrc.me)', type: 'query', movie: 'https://vidsrc.me/embed/movie?tmdb=', tv: 'https://vidsrc.me/embed/tv?tmdb=' },
-    { name: 'Server 2 (VidLink)', type: 'path', movie: 'https://vidlink.pro/movie/', tv: 'https://vidlink.pro/tv/' },
-    { name: 'Server 3 (SmashyStream)', type: 'query', movie: 'https://embed.smashystream.com/playere.php?tmdb=', tv: 'https://embed.smashystream.com/playere.php?tmdb=' },
-    { name: 'Server 4 (2Embed)', type: '2embed', movie: 'https://www.2embed.cc/embed/', tv: 'https://www.2embed.cc/embedtv/' }
-  ];
-
   var content = document.getElementById('content');
   var loading = document.getElementById('loading');
   var heroBackdrop = document.getElementById('hero-backdrop');
@@ -210,27 +203,9 @@
   }
 
   function initServerSelector() {
-    if (document.getElementById('server-select')) {
-      serverSelect = document.getElementById('server-select');
-      return;
-    }
-    serverSelect = document.createElement('select');
-    serverSelect.id = 'server-select';
-    serverSelect.className = 'tv-select';
-
-    SERVERS.forEach(function (s, idx) {
-      var opt = document.createElement('option');
-      opt.value = idx;
-      opt.textContent = s.name;
-      serverSelect.appendChild(opt);
-    });
-
-    var header = playerModal.querySelector('.player-header');
-    if (header) header.appendChild(serverSelect);
-
-    serverSelect.addEventListener('change', function () {
-      loadServer(parseInt(this.value, 10) || 0);
-    });
+    var existing = document.getElementById('server-select');
+    if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+    serverSelect = null;
   }
 
   function fetchTMDB(endpoint) {
@@ -863,15 +838,6 @@
   function closeDetail() {
     detailModal.classList.remove('active');
     document.body.style.overflow = '';
-  }
-
-  function buildEmbedURL(server, mediaType, id, season, episode) {
-    season = season || 1;
-    episode = episode || 1;
-    if (mediaType === 'movie') return server.movie + id;
-    if (server.type === 'query') return server.tv + id + '&season=' + season + '&episode=' + episode;
-    if (server.type === '2embed') return server.tv + id + '&s=' + season + '&e=' + episode;
-    return server.tv + id + '/' + season + '/' + episode;
   }
 
   function populateQualityChips(levels) {
@@ -1597,21 +1563,6 @@
     }
     playerModal.classList.add('active');
     document.body.style.overflow = 'hidden';
-  }
-
-  function loadServer(serverIndex) {
-    if (!currentMedia) return;
-    destroyCustomPlayer();
-    showLoader(false);
-    var item = currentMedia.item;
-    var type = currentMedia.type;
-    var sNum = seasonSelect.value || 1;
-    var eNum = episodeSelect.value || 1;
-    var server = SERVERS[serverIndex] || SERVERS[0];
-    if (serverSelect) serverSelect.value = serverIndex.toString();
-    playerIframe.src = buildEmbedURL(server, type, item.id, sNum, eNum);
-    setShield(true);
-    showOverlay();
   }
 
   function showOverlay() {

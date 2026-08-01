@@ -242,6 +242,52 @@ function parseCodec(title) {
   return '';
 }
 
+function normalizeText(text) {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function buildTitleTokens(title) {
+  return normalizeText(title)
+    .split(' ')
+    .filter(function (token) {
+      return token && token.length > 2 && !/^\d{4}$/.test(token);
+    });
+}
+
+function scoreVideoFileName(fileName, candTitle, type, season, episode) {
+  var name = normalizeText(fileName);
+  var score = 0;
+  var tokens = buildTitleTokens(candTitle);
+
+  for (var i = 0; i < tokens.length; i++) {
+    if (name.indexOf(tokens[i]) !== -1) score += 4;
+  }
+
+  if (type === 'tv') {
+    var sPadded = String(season).padStart(2, '0');
+    var ePadded = String(episode).padStart(2, '0');
+    if (new RegExp('s' + sPadded + 'e' + ePadded).test(name)) score += 12;
+    if (new RegExp('' + season + 'x' + ePadded).test(name)) score += 10;
+    if (new RegExp('episode\s*' + String(episode).padStart(1, '0')).test(name)) score += 6;
+  }
+
+  if (/sample|trailer|teaser|promo|preview|behind the scenes|featurette|clip|music video|song|soundtrack|ost|opening|ending|extras?|bonus|deleted scenes?|subtitle|sample/.test(name)) {
+    score -= 20;
+  }
+
+  if (/full movie|complete movie|main movie|feature|movie/.test(name)) score += 3;
+  if (/\b(1080|2160|720|480)p\b/.test(name)) score += 2;
+  if (/\b(x264|x265|hevc|avc)\b/.test(name)) score += 2;
+  if (/\b(bluray|web-dl|webrip|hdrip|remux)\b/.test(name)) score += 1;
+  if (/\b(cam|ts|tc|scr|dvdscr)\b/.test(name)) score -= 8;
+
+  return score;
+}
+
 // ---- TorBox checkcached (batched, ~100 hashes per request) ----
 function parseCheckcachedMap(json) {
   var out = {};
@@ -436,22 +482,23 @@ function pickVideoFile(files, type, season, episode, cand) {
   if (videoFiles.length === 0) videoFiles = files;
 
   var fileId = null;
-  if (type === 'tv' && videoFiles.length > 0) {
-    var sPadded = String(season).padStart(2, '0');
-    var ePadded = String(episode).padStart(2, '0');
-    var pats = [
-      new RegExp('S' + sPadded + 'E' + ePadded, 'i'),
-      new RegExp(season + 'x' + ePadded, 'i'),
-      new RegExp('E' + ePadded + '\\b', 'i')
-    ];
-    var matched = null;
-    for (var p = 0; p < pats.length; p++) {
-      matched = videoFiles.find(function (f) { return pats[p].test(f.name || f.short_name || ''); });
-      if (matched) break;
-    }
-    fileId = matched ? matched.id : videoFiles[0].id;
-  } else if (videoFiles.length > 0) {
-    fileId = videoFiles[0].id;
+  if (videoFiles.length > 0) {
+    var scored = videoFiles.map(function (f, idx) {
+      var name = f.name || f.short_name || '';
+      return {
+        file: f,
+        idx: idx,
+        score: scoreVideoFileName(name, cand && cand.title, type, season, episode)
+      };
+    });
+
+    scored.sort(function (a, b) {
+      if (b.score !== a.score) return b.score - a.score;
+      return a.idx - b.idx;
+    });
+
+    var best = scored[0] ? scored[0].file : null;
+    fileId = best ? best.id : null;
   }
   if (fileId === null || fileId === undefined) fileId = cand && cand.fileIdx;
   if (fileId === null || fileId === undefined) fileId = 0;
