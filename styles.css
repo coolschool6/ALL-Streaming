@@ -493,66 +493,6 @@ img {
   background: rgba(20,150,80,0.95);
 }
 
-/* ===== CATALOG ENFORCEMENT (unreleased / unavailable overlays) ===== */
-.card--unreleased .card-poster img,
-.card--unreleased .top-card-poster img {
-  filter: grayscale(0.5) brightness(0.6);
-  transition: filter 0.3s;
-}
-
-.card--unreleased:hover .card-poster img {
-  filter: grayscale(0.3) brightness(0.75);
-}
-
-.card-unreleased-badge {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 4;
-  padding: 18px 10px 10px;
-  background: linear-gradient(to top, rgba(0,0,0,0.92) 30%, rgba(0,0,0,0.35) 75%, transparent 100%);
-  color: #ffd166;
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 1.35;
-  text-align: center;
-  letter-spacing: 0.2px;
-  pointer-events: none;
-  text-transform: uppercase;
-}
-
-.top-card .card-unreleased-badge {
-  padding: 14px 8px 8px;
-  font-size: 9px;
-}
-
-.episode-card--unreleased {
-  opacity: 0.75;
-  cursor: default;
-}
-
-.episode-card--unreleased .episode-thumb img {
-  filter: grayscale(0.5) brightness(0.6);
-}
-
-.episode-unreleased-badge {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0,0,0,0.55);
-  color: #ffd166;
-  font-size: 10px;
-  font-weight: 600;
-  text-align: center;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-  padding: 8px;
-  pointer-events: none;
-}
-
 @keyframes badgeIn {
   from { opacity: 0; transform: translateY(-6px); }
   to { opacity: 1; transform: translateY(0); }
@@ -734,7 +674,6 @@ img {
   border-radius: 8px;
   overflow: hidden;
   flex-shrink: 0;
-  position: relative;
 }
 
 .top-card-poster img {
@@ -1468,7 +1407,6 @@ img {
   border-radius: 8px;
   overflow: hidden;
   background: var(--bg-card);
-  position: relative;
 }
 
 .episode-thumb img {
