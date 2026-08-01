@@ -82,6 +82,22 @@ img {
   white-space: nowrap;
 }
 
+.version-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.16);
+  color: rgba(255,255,255,0.72);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  transform: translateY(1px);
+}
+
 .hamburger {
   display: none;
   flex-direction: column;
@@ -1636,6 +1652,11 @@ img {
     gap: 24px;
   }
 
+  .version-badge {
+    font-size: 10px;
+    padding: 3px 7px;
+  }
+
   .hero-content {
     left: 24px;
     max-width: 420px;
@@ -1712,6 +1733,10 @@ img {
 
   .nav-btn:active {
     background: rgba(255,255,255,0.1);
+  }
+
+  .version-badge {
+    display: none;
   }
 
   .subscription-badge {
