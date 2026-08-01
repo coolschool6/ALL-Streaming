@@ -6,6 +6,7 @@
   // localStorage caches the expiry for instant offline check
 
   var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxQRgoIOUUJaJP0WKFaFFs4y4UVyhMh853GJPyO1CO4TDfag9H8cduAS_05ffrxLaxz/exec';
+  var VERIFY_INTERVAL_MS = 15 * 60 * 1000;
 
   function checkPaywall() {
     var overlay = document.getElementById('paywall-overlay');
@@ -67,7 +68,7 @@
 
     var lastCheck = localStorage.getItem('asfr_last_verify');
     var now = Date.now();
-    if (lastCheck && (now - parseInt(lastCheck, 10)) < 86400000) return;
+    if (lastCheck && (now - parseInt(lastCheck, 10)) < VERIFY_INTERVAL_MS) return;
 
     fetch(SCRIPT_URL + '?action=verify&key=' + encodeURIComponent(savedKey))
       .then(function (res) { return res.json(); })
@@ -128,6 +129,7 @@
   window.addEventListener('DOMContentLoaded', function () {
     checkPaywall();
     backgroundVerifyKey();
+    setInterval(backgroundVerifyKey, VERIFY_INTERVAL_MS);
     setupPaywallEvents();
 
     var logoutBtn = document.getElementById('btn-logout');
