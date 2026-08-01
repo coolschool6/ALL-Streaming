@@ -195,7 +195,6 @@
   var plyrInstance = null;
   var customActive = false;
   var sourceCache = { url: null, hlsUrl: null, ready: false, warm: false };
-  var healingInProgress = false;
   var forceRefresh = false;
   var prefetchInFlight = {};
   var prefetchPromises = {};
@@ -969,8 +968,8 @@
     } else {
       customActive = false;
       video.style.display = 'none';
-      iframe.style.display = 'block';
       showLoader(false);
+      showPlayerError('HLS playback is not supported by this browser.');
     }
   }
 
@@ -1006,12 +1005,6 @@
     var label = document.getElementById('source-label');
     if (video) { video.style.display = 'none'; video.removeAttribute('src'); }
     if (label) { label.textContent = msg; label.style.display = 'block'; label.style.background = 'rgba(255,0,0,0.3)'; label.style.padding = '10px'; }
-  }
-
-  function fallbackToIframe() {
-    if (!currentMedia) return;
-    showPlayerError('Torrent stream unavailable - playing fallback server.');
-    loadServer(0);
   }
 
   var STREAM_CACHE_TTL = 24 * 60 * 60 * 1000;
@@ -1055,19 +1048,11 @@
         episodeSelect ? episodeSelect.value || 1 : 1);
       clearSourceCache();
     }
-    var noCached = !!(err && err.noCached);
-    if (!healingInProgress && currentMedia && !noCached) {
-      healingInProgress = true;
-      forceRefresh = true;
-      attemptCustomPlayer().then(function () {
-        healingInProgress = false;
-      }).catch(function () {
-        healingInProgress = false;
-        fallbackToIframe();
-      });
-    } else {
-      fallbackToIframe();
-    }
+    var msg = '';
+    if (err && err.error) msg = err.error;
+    else if (err && err.message) msg = err.message;
+    if (!msg) msg = 'Stream could not be played. Try again or pick a server.';
+    showPlayerError(msg);
   }
 
   function onPlaybackError() {
@@ -1275,6 +1260,41 @@
       if (type === 'tv') url += '&season=' + sNum + '&episode=' + eNum;
       if (forceRefresh) url += '&refresh=1';
 
+      function scrapeAndDownload(imdbId) {
+        showLoader(true, 'Searching torrent sources (first lookup can take up to ~45s)...');
+        browserScrapeStreams(imdbId, type, sNum, eNum).then(function (streams) {
+          if (!streams || !streams.length) throw new Error('no torrents found');
+          return fetch('/api/torbox-source', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              tmdbId: item.id,
+              type: type,
+              season: sNum,
+              episode: eNum,
+              imdbId: imdbId,
+              streams: streams,
+              download: true
+            })
+          }).then(function (r) {
+            return r.json().then(function (d) {
+              if (!r.ok) throw d;
+              return d;
+            });
+          });
+        }).then(function (data) {
+          if (data && data.downloading && data.torrentId) {
+            return pollTorrentStream(item, type, sNum, eNum, data.torrentId, data.torrentHash, data.torrentTitle);
+          }
+          if (!data || !data.hlsUrl) throw new Error('No cached torrent');
+          return data;
+        }).then(function (data) {
+          resolve(data);
+        }).catch(function (e2) {
+          reject(e2);
+        });
+      }
+
       var controller = new AbortController();
       var timeout = setTimeout(function () { controller.abort(); }, 90000);
 
@@ -1288,45 +1308,57 @@
         if (!data.hlsUrl) throw new Error('No HLS URL');
         resolve(data);
       }).catch(function (err) {
-        if (err && err.noCached) {
-          var e = new Error('No cached torrent');
-          e.noCached = true;
-          reject(e);
-          return;
-        }
         var imdbId = err && err.imdbId;
         if (!imdbId) { reject(err); return; }
-        showLoader(true, 'Searching torrent sources (first lookup can take up to ~45s)...');
-        browserScrapeStreams(imdbId, type, sNum, eNum).then(function (streams) {
-          if (!streams || !streams.length) throw new Error('no torrents found');
-          return fetch('/api/torbox-source', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              tmdbId: item.id,
-              type: type,
-              season: sNum,
-              episode: eNum,
-              imdbId: imdbId,
-              streams: streams
-            })
-          }).then(function (r) {
-            return r.json().then(function (d) {
-              if (!r.ok) throw d;
-              return d;
-            });
+        scrapeAndDownload(imdbId);
+      });
+    });
+  }
+
+  function pollTorrentStream(item, type, sNum, eNum, torrentId, torrentHash, torrentTitle) {
+    return new Promise(function (resolve, reject) {
+      var url = '/api/torbox-source?tmdbId=' + item.id + '&type=' + type;
+      if (type === 'tv') url += '&season=' + sNum + '&episode=' + eNum;
+      url += '&action=progress&torrentId=' + encodeURIComponent(torrentId);
+      if (torrentHash) url += '&hash=' + encodeURIComponent(torrentHash);
+      if (torrentTitle) url += '&title=' + encodeURIComponent(String(torrentTitle).slice(0, 150));
+
+      var started = Date.now();
+      var MAX_WAIT = 4 * 60 * 1000;
+      var POLL_INTERVAL = 4000;
+      var lastPct = 0;
+      var failures = 0;
+
+      function tick() {
+        if (Date.now() - started > MAX_WAIT) {
+          reject(new Error('Download is taking too long. Try again later.'));
+          return;
+        }
+        showLoader(true, 'Preparing stream (downloading to server)... ' + lastPct + '%');
+        var controller = new AbortController();
+        var t = setTimeout(function () { controller.abort(); }, 9000);
+        fetch(url, { signal: controller.signal, cache: 'no-store' }).then(function (r) {
+          clearTimeout(t);
+          return r.json().then(function (data) {
+            if (!r.ok) throw data;
+            return data;
           });
         }).then(function (data) {
-          if (!data || !data.hlsUrl) {
-            var e = new Error('No cached torrent');
-            e.noCached = true;
-            throw e;
+          if (data && data.hlsUrl) { resolve(data); return; }
+          if (data && typeof data.progress === 'number') lastPct = Math.round(data.progress);
+          showLoader(true, 'Preparing stream (downloading to server)... ' + lastPct + '%');
+          setTimeout(tick, POLL_INTERVAL);
+        }).catch(function (err) {
+          clearTimeout(t);
+          failures++;
+          if (Date.now() - started <= MAX_WAIT && failures < 4) {
+            setTimeout(tick, POLL_INTERVAL);
+          } else {
+            reject(err);
           }
-          resolve(data);
-        }).catch(function (e2) {
-          reject(e2);
         });
-      });
+      }
+      tick();
     });
   }
 
@@ -1497,8 +1529,8 @@
         initCustomPlayer(warm.url, warm.source || 'TorBox');
       } else {
         showLoader(true, 'Loading stream...');
-        attemptCustomPlayer().catch(function () {
-          fallbackToIframe();
+        attemptCustomPlayer().catch(function (err) {
+          handleCustomPlayerFailure(err);
         });
       }
     }
