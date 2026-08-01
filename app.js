@@ -256,6 +256,34 @@
     return d.innerHTML;
   }
 
+  function parseReleaseDate(item) {
+    var raw = item && (item.release_date || item.first_air_date || '');
+    if (!raw) return null;
+    var dt = new Date(raw);
+    return isNaN(dt.getTime()) ? null : dt;
+  }
+
+  function isFutureRelease(item) {
+    var dt = parseReleaseDate(item);
+    if (!dt) return false;
+    return dt.getTime() > Date.now();
+  }
+
+  function getAvailabilityMessage(item) {
+    return isFutureRelease(item) ? 'Available on a future date upon official release' : '';
+  }
+
+  function addAvailabilityBadge(card, item) {
+    var existing = card.querySelector('.card-availability');
+    if (existing) existing.remove();
+    if (!isFutureRelease(item)) return;
+    var badge = document.createElement('div');
+    badge.className = 'card-availability';
+    badge.textContent = 'Future release';
+    var poster = card.querySelector('.card-poster');
+    if (poster) poster.appendChild(badge);
+  }
+
   function initHero(items) {
     heroItems = items.slice(0, 8);
     heroIndex = 0;
@@ -536,6 +564,7 @@
       poster.appendChild(ratingBadge);
     }
 
+    addAvailabilityBadge(card, item);
     card.appendChild(poster);
 
     var info = document.createElement('div');
@@ -583,6 +612,7 @@
     var src = item.poster_path || item.backdrop_path;
     img.src = src ? imgURL(src) : '';
     posterWrap.appendChild(img);
+    addAvailabilityBadge(card, item);
     card.appendChild(posterWrap);
     card.addEventListener('click', function () { openDetail(item, mediaType); });
     card.addEventListener('mouseenter', function () {
@@ -607,7 +637,14 @@
     detailPoster.innerHTML = item.poster_path ? '<img src="' + imgURL(item.poster_path) + '" alt="">' : '';
     detailTitle.textContent = item.title || item.name || '';
     detailOverview.textContent = item.overview || '';
-    detailWatch.onclick = function () { closeDetail(); openPlayer(item, mediaType); };
+    var blocked = isFutureRelease(item);
+    detailWatch.disabled = blocked;
+    detailWatch.textContent = blocked ? 'Unavailable' : 'Watch now';
+    detailWatch.onclick = function () {
+      if (blocked) return;
+      closeDetail();
+      openPlayer(item, mediaType);
+    };
     detailModal.classList.add('active');
     document.body.style.overflow = 'hidden';
     if (mediaType !== 'tv') {
@@ -1512,6 +1549,10 @@
   }
 
   function openPlayer(item, mediaType) {
+    if (isFutureRelease(item)) {
+      showPlayerError('Available on a future date upon official release');
+      return;
+    }
     initServerSelector();
     currentMedia = { item: item, type: mediaType };
     currentPlaybackId = newPlaybackId();

@@ -1,5 +1,12 @@
 {
   "name": "allstreaming",
   "version": "1.0.0",
-  "private": true
+  "private": true,
+  "scripts": {
+    "dev": "node scripts/dev-server.mjs",
+    "audit:playback": "node scripts/playback-audit.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.55.0"
+  }
 }

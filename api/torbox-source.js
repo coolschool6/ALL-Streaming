@@ -322,6 +322,35 @@ function torboxErrorCode(json) {
   return '';
 }
 
+function extractHlsUrl(json) {
+  var payload = (json && json.data) || json || null;
+  if (!payload || typeof payload !== 'object') return '';
+
+  var candidates = [];
+  if (payload.hls_url) candidates.push(payload.hls_url);
+  if (payload.hlsUrl) candidates.push(payload.hlsUrl);
+  if (payload.url) candidates.push(payload.url);
+  if (payload.stream_url) candidates.push(payload.stream_url);
+  if (payload.streamUrl) candidates.push(payload.streamUrl);
+  if (payload.m3u8_url) candidates.push(payload.m3u8_url);
+  if (payload.m3u8Url) candidates.push(payload.m3u8Url);
+  if (payload.manifest_url) candidates.push(payload.manifest_url);
+  if (payload.manifestUrl) candidates.push(payload.manifestUrl);
+  if (payload.playback_url) candidates.push(payload.playback_url);
+  if (payload.playbackUrl) candidates.push(payload.playbackUrl);
+  if (Array.isArray(payload.urls)) payload.urls.forEach(function (u) { if (typeof u === 'string') candidates.push(u); });
+  if (Array.isArray(payload.streams)) payload.streams.forEach(function (u) { if (typeof u === 'string') candidates.push(u); });
+
+  for (var i = 0; i < candidates.length; i++) {
+    var candidate = String(candidates[i] || '').trim();
+    if (!candidate) continue;
+    if (/\.m3u8($|\?)/i.test(candidate) || /\/stream\//i.test(candidate) || /\/manifest/i.test(candidate)) {
+      return candidate;
+    }
+  }
+  return '';
+}
+
 function friendlyTorBoxError(json) {
   var msg = extractTorBoxError(json);
   var lower = msg.toLowerCase();
@@ -450,8 +479,8 @@ async function createStreamForTorrent(torrentId, files, type, season, episode, c
   if (!res.ok || !json || !json.success || !json.data) {
     return { error: friendlyTorBoxError(json), torboxError: torboxErrorCode(json) };
   }
-  var hlsUrl = json.data.hls_url;
-  if (!hlsUrl) return { error: 'TorBox returned no stream URL.', torboxError: 'no_hls' };
+  var hlsUrl = extractHlsUrl(json);
+  if (!hlsUrl) return { error: 'TorBox returned no HLS manifest URL.', torboxError: 'no_hls' };
   return {
     hlsUrl: hlsUrl,
     source: buildSourceMeta(cand),
@@ -462,17 +491,6 @@ async function createStreamForTorrent(torrentId, files, type, season, episode, c
       codec: parseCodec(cand && cand.title)
     }
   };
-}
-
-// Direct CDN playback fallback (raw view) for plans without web streaming.
-async function requestDlUrl(torrentId, fileId) {
-  var path = '/torrents/requestdl?token=' + encodeURIComponent(TORBOX_KEY) +
-    '&torrent_id=' + torrentId + '&file_id=' + fileId + '&redirect=false';
-  var res = await torboxRequest(path, 'GET', null, 8000);
-  if (!res || !res.ok) return null;
-  var json = res.json;
-  if (!json || !json.success || !json.data) return null;
-  return json.data;
 }
 
 function isBrowserPlayableFile(files, fileId, cand) {
@@ -489,37 +507,14 @@ function isBrowserPlayableFile(files, fileId, cand) {
   return extOk || mimeOk;
 }
 
-// Prefer HLS; fall back to a direct CDN URL when the plan blocks createstream.
+// Native TorBox HLS only. We no longer use direct-download fallbacks for playback.
 async function resolveStreamOrDirect(torrentId, files, type, season, episode, cand) {
   var stream = await createStreamForTorrent(torrentId, files, type, season, episode, cand);
   if (stream && stream.hlsUrl) return stream;
-  var code = stream && stream.torboxError;
-  if (code === 'PLAN_RESTRICTED_FEATURE' || code === 'plan_restricted_feature' || code === 'no_hls' || code === 'stream_failed') {
-    var fileId = pickVideoFile(files || [], type, season, episode, cand);
-    if (!isBrowserPlayableFile(files, fileId, cand)) {
-      return {
-        error: 'This file type can\'t play in the browser on your current TorBox plan. Upgrade your plan or pick a different server.',
-        torboxError: 'not_browser_playable',
-        fileId: fileId
-      };
-    }
-    var directUrl = await requestDlUrl(torrentId, fileId);
-    if (!directUrl) {
-      return stream || { error: 'Could not create a direct playback URL for this file.', torboxError: 'requestdl_failed' };
-    }
-    return {
-      directUrl: directUrl,
-      source: buildSourceMeta(cand),
-      debug: {
-        hash: cand ? cand.cleanHash : null,
-        torrentId: torrentId,
-        fileId: fileId,
-        codec: parseCodec(cand && cand.title),
-        direct: true
-      }
-    };
-  }
-  return stream;
+  return stream || {
+    error: 'TorBox could not create a native HLS stream for this title.',
+    torboxError: 'stream_failed'
+  };
 }
 
 async function startTorrentDownload(cand, type, season, episode) {
