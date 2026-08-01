@@ -1,3 +1,7 @@
+import { loadEnv } from '../scripts/load-env.mjs';
+
+loadEnv();
+
 // Environment Variables
 var TMDB_KEY = process.env.TMDB_API_KEY || 'cd27a14dfc1752e04b474124a5af6d2b';
 var TORBOX_KEY = process.env.TORBOX_API_KEY;
