@@ -216,41 +216,55 @@ function parseCodec(title) {
   return '';
 }
 
-// ---- TorBox checkcached (robust, per-hash, parallel) ----
-function parseCheckcached(json, hash) {
-  if (!json || !json.success || !json.data) return null;
+// ---- TorBox checkcached (batched, ~100 hashes per request) ----
+function parseCheckcachedMap(json) {
+  var out = {};
+  if (!json || !json.success || !json.data) return out;
   var d = json.data;
   if (Array.isArray(d)) {
     for (var i = 0; i < d.length; i++) {
-      if (d[i] && d[i].hash && String(d[i].hash).toLowerCase() === hash) {
-        return d[i].cached ? d[i] : null;
-      }
+      var it = d[i];
+      if (it && it.hash) out[String(it.hash).toLowerCase()] = it;
     }
-    return null;
+  } else if (typeof d === 'object') {
+    for (var k in d) {
+      if (Object.prototype.hasOwnProperty.call(d, k)) out[String(k).toLowerCase()] = d[k];
+    }
   }
-  var entry = d[hash] || d[hash.toUpperCase()];
-  return (entry && typeof entry === 'object') ? entry : null;
+  return out;
 }
 
-async function checkCachedOne(hash) {
-  var j = await torboxFetch('/torrents/checkcached?hash=' + hash + '&format=object&list_files=true', 5000);
-  return parseCheckcached(j, hash);
+// Prefer broadly-playable AVC, then higher quality.
+function sortCandidates(candidates) {
+  var scored = candidates.map(function (c) {
+    return {
+      cand: c,
+      codec: parseCodec(c.title),
+      quality: parseQuality(c.title)
+    };
+  });
+  scored.sort(function (a, b) {
+    var pa = a.codec === 'avc' ? 2 : (a.codec === 'hevc' ? 1 : 0);
+    var pb = b.codec === 'avc' ? 2 : (b.codec === 'hevc' ? 1 : 0);
+    if (pb !== pa) return pb - pa;
+    return b.quality - a.quality;
+  });
+  return scored.map(function (s) { return s.cand; });
 }
 
-// Find the first cached candidate, checking up to maxChecked in parallel batches.
+// Find the first cached candidate. Checks up to maxChecked hashes in batched requests.
 async function findCachedCandidate(candidates, maxChecked) {
-  var limit = Math.min(maxChecked || 15, candidates.length);
-  var BATCH = 6;
+  var limit = Math.min(maxChecked || 100, candidates.length);
+  var BATCH = 50;
   for (var start = 0; start < limit; start += BATCH) {
     var chunk = candidates.slice(start, start + BATCH);
-    var results = await Promise.all(chunk.map(function (c) {
-      return checkCachedOne(c.cleanHash)
-        .then(function (filesData) { return { cand: c, data: filesData }; })
-        .catch(function () { return { cand: c, data: null }; });
-    }));
-    for (var i = 0; i < results.length; i++) {
-      if (results[i].data) {
-        return { cand: results[i].cand, files: results[i].data.files || [] };
+    var hashList = chunk.map(function (c) { return c.cleanHash; }).join(',');
+    var j = await torboxFetch('/torrents/checkcached?hash=' + hashList + '&format=object&list_files=true', 8000);
+    var map = parseCheckcachedMap(j);
+    for (var i = 0; i < chunk.length; i++) {
+      var entry = map[chunk[i].cleanHash];
+      if (entry && entry.cached) {
+        return { cand: chunk[i], files: entry.files || [] };
       }
     }
   }
@@ -259,7 +273,7 @@ async function findCachedCandidate(candidates, maxChecked) {
 
 // ---- Build a TorBox stream from a list of torrent candidates ----
 async function buildTorBoxStream(candidates, type, season, episode) {
-  var best = await findCachedCandidate(candidates, 15);
+  var best = await findCachedCandidate(candidates, 100);
   if (!best) return null;
 
   var hash = best.cand.cleanHash;
@@ -385,7 +399,7 @@ async function processStreamRequest(req) {
   // 2. Use hashes the client scraped in its own browser, or a shared cache
   var candidates = null;
   if (provided && provided.length) {
-    candidates = provided;
+    candidates = sortCandidates(provided);
   } else {
     var sharedHashes = trCacheGet(trKey);
     if (!sharedHashes) sharedHashes = await upstashTrGet(trKey);
