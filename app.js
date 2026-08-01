@@ -194,7 +194,7 @@
   var hlsInstance = null;
   var plyrInstance = null;
   var customActive = false;
-  var sourceCache = { url: null, hlsUrl: null, ready: false, warm: false };
+  var sourceCache = { url: null, hlsUrl: null, directUrl: null, direct: false, ready: false, warm: false };
   var forceRefresh = false;
   var prefetchInFlight = {};
   var prefetchPromises = {};
@@ -862,7 +862,7 @@
     heights.forEach(function (h) { addChip(String(h), h + 'p', false); });
   }
 
-  function initCustomPlayer(sourceUrl, sourceName) {
+  function initCustomPlayer(sourceUrl, sourceName, isDirect) {
     var pid = currentPlaybackId;
     var video = document.getElementById('hls-video');
     var iframe = document.getElementById('player-iframe');
@@ -890,7 +890,7 @@
 
     var isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) && /AppleWebKit/.test(navigator.userAgent);
 
-    if (video.canPlayType('application/vnd.apple.mpegurl') || isIOS) {
+    if (isDirect || video.canPlayType('application/vnd.apple.mpegurl') || isIOS) {
       video.src = sourceUrl;
       video.addEventListener('loadedmetadata', function () {
         if (currentPlaybackId !== pid) return;
@@ -1027,11 +1027,12 @@
     } catch (e) { return null; }
   }
 
-  function streamCacheSet(type, id, season, episode, url, source) {
+  function streamCacheSet(type, id, season, episode, url, source, direct) {
     try {
       localStorage.setItem(streamCacheKey(type, id, season, episode), JSON.stringify({
         url: url,
         source: source || 'TorBox',
+        direct: !!direct,
         t: Date.now()
       }));
     } catch (e) {}
@@ -1222,6 +1223,8 @@
   function clearSourceCache() {
     sourceCache.url = null;
     sourceCache.hlsUrl = null;
+    sourceCache.directUrl = null;
+    sourceCache.direct = false;
     sourceCache.ready = false;
     sourceCache.source = '';
     sourceCache.warm = false;
@@ -1286,7 +1289,7 @@
           if (data && data.downloading && data.torrentId) {
             return pollTorrentStream(item, type, sNum, eNum, data.torrentId, data.torrentHash, data.torrentTitle);
           }
-          if (!data || !data.hlsUrl) throw new Error('No cached torrent');
+          if (!data || (!data.hlsUrl && !data.directUrl)) throw new Error('No cached torrent');
           return data;
         }).then(function (data) {
           resolve(data);
@@ -1305,7 +1308,7 @@
           return data;
         });
       }).then(function (data) {
-        if (!data.hlsUrl) throw new Error('No HLS URL');
+        if (!data.hlsUrl && !data.directUrl) throw new Error('No stream URL');
         resolve(data);
       }).catch(function (err) {
         var imdbId = err && err.imdbId;
@@ -1344,7 +1347,7 @@
             return data;
           });
         }).then(function (data) {
-          if (data && data.hlsUrl) { resolve(data); return; }
+          if (data && (data.hlsUrl || data.directUrl)) { resolve(data); return; }
           if (data && typeof data.progress === 'number') lastPct = Math.round(data.progress);
           showLoader(true, 'Preparing stream (downloading to server)... ' + lastPct + '%');
           setTimeout(tick, POLL_INTERVAL);
@@ -1373,7 +1376,9 @@
 
     var cached = streamCacheGet(type, item.id, sNum, eNum);
     if (cached) {
-      sourceCache.hlsUrl = cached.url;
+      sourceCache.hlsUrl = cached.direct ? null : cached.url;
+      sourceCache.directUrl = cached.direct ? cached.url : null;
+      sourceCache.direct = !!cached.direct;
       sourceCache.source = cached.source || 'TorBox';
       sourceCache.url = url;
       sourceCache.ready = true;
@@ -1388,13 +1393,15 @@
       if (!r.ok) throw new Error('status ' + r.status);
       return r.json();
     }).then(function (data) {
-      if (!data.hlsUrl) throw new Error('No HLS URL');
-      sourceCache.hlsUrl = data.hlsUrl;
+      if (!data.hlsUrl && !data.directUrl) throw new Error('No stream URL');
+      sourceCache.hlsUrl = data.hlsUrl || null;
+      sourceCache.directUrl = data.directUrl || null;
+      sourceCache.direct = !!data.directUrl;
       sourceCache.source = data.source || 'TorBox';
       sourceCache.url = url;
       sourceCache.ready = true;
       sourceCache.warm = true;
-      streamCacheSet(type, item.id, sNum, eNum, data.hlsUrl, data.source || 'TorBox');
+      streamCacheSet(type, item.id, sNum, eNum, data.hlsUrl || data.directUrl, data.source || 'TorBox', !!data.directUrl);
     }).finally(function () {
       clearTimeout(timeout);
       delete prefetchInFlight[url];
@@ -1449,13 +1456,15 @@
         showLoader(true, 'Loading stream...');
         resolveHybridStream(item, type, sNum, eNum).then(function (data) {
           forceRefresh = false;
-          sourceCache.hlsUrl = data.hlsUrl;
+          sourceCache.hlsUrl = data.hlsUrl || null;
+          sourceCache.directUrl = data.directUrl || null;
+          sourceCache.direct = !!data.directUrl;
           sourceCache.source = data.source || 'TorBox';
           sourceCache.url = url;
           sourceCache.ready = true;
           sourceCache.warm = false;
-          streamCacheSet(type, item.id, sNum, eNum, data.hlsUrl, data.source || 'TorBox');
-          initCustomPlayer(data.hlsUrl, data.source || 'TorBox');
+          streamCacheSet(type, item.id, sNum, eNum, data.hlsUrl || data.directUrl, data.source || 'TorBox', !!data.directUrl);
+          initCustomPlayer(data.hlsUrl || data.directUrl, data.source || 'TorBox', !!data.directUrl);
           resolve();
         }).catch(function (err) {
           forceRefresh = false;
@@ -1468,8 +1477,8 @@
         showLoader(true, 'Loading stream...');
         pf.then(function () {
           sourceCache.warm = true;
-          if (sourceCache.ready && sourceCache.hlsUrl && sourceCache.url === url) {
-            initCustomPlayer(sourceCache.hlsUrl, sourceCache.source);
+          if (sourceCache.ready && (sourceCache.hlsUrl || sourceCache.directUrl) && sourceCache.url === url) {
+            initCustomPlayer(sourceCache.hlsUrl || sourceCache.directUrl, sourceCache.source, sourceCache.direct);
             resolve();
           } else {
             runHybrid();
@@ -1480,19 +1489,21 @@
         return;
       }
 
-      if (!forceRefresh && sourceCache.url === url && sourceCache.ready && sourceCache.hlsUrl) {
-        initCustomPlayer(sourceCache.hlsUrl, sourceCache.source);
+      if (!forceRefresh && sourceCache.url === url && sourceCache.ready && (sourceCache.hlsUrl || sourceCache.directUrl)) {
+        initCustomPlayer(sourceCache.hlsUrl || sourceCache.directUrl, sourceCache.source, sourceCache.direct);
         resolve(); return;
       }
 
       var cached = !forceRefresh ? streamCacheGet(type, item.id, sNum, eNum) : null;
       if (cached && cached.url) {
-        sourceCache.hlsUrl = cached.url;
+        sourceCache.hlsUrl = cached.direct ? null : cached.url;
+        sourceCache.directUrl = cached.direct ? cached.url : null;
+        sourceCache.direct = !!cached.direct;
         sourceCache.source = cached.source || 'TorBox';
         sourceCache.url = url;
         sourceCache.ready = true;
         sourceCache.warm = true;
-        initCustomPlayer(cached.url, cached.source || 'TorBox');
+        initCustomPlayer(cached.url, cached.source || 'TorBox', !!cached.direct);
         resolve(); return;
       }
 
@@ -1521,12 +1532,14 @@
       var eNum = 1;
       var warm = streamCacheGet(mediaType, item.id, sNum, eNum);
       if (warm && warm.url) {
-        sourceCache.hlsUrl = warm.url;
+        sourceCache.hlsUrl = warm.direct ? null : warm.url;
+        sourceCache.directUrl = warm.direct ? warm.url : null;
+        sourceCache.direct = !!warm.direct;
         sourceCache.source = warm.source || 'TorBox';
         sourceCache.url = '/api/torbox-source?tmdbId=' + item.id + '&type=movie';
         sourceCache.ready = true;
         sourceCache.warm = true;
-        initCustomPlayer(warm.url, warm.source || 'TorBox');
+        initCustomPlayer(warm.url, warm.source || 'TorBox', !!warm.direct);
       } else {
         showLoader(true, 'Loading stream...');
         attemptCustomPlayer().catch(function (err) {

@@ -35,6 +35,32 @@ function cacheSet(key, payload) {
   RESULT_CACHE[key] = { t: Date.now(), payload: payload };
 }
 
+// Cached entries are stored as { url, direct, source, debug } (legacy: { hlsUrl, source, debug }).
+function normalizeCachedPayload(entry) {
+  if (!entry) return null;
+  var out = { source: entry.source || 'TorBox', debug: entry.debug || null };
+  if (entry.direct) {
+    out.directUrl = entry.url;
+    out.direct = true;
+  } else if (entry.url) {
+    out.hlsUrl = entry.url;
+  } else if (entry.hlsUrl) {
+    out.hlsUrl = entry.hlsUrl;
+  } else {
+    return null;
+  }
+  return out;
+}
+
+function toCacheStore(payload) {
+  return {
+    url: payload.hlsUrl || payload.directUrl,
+    direct: !!payload.directUrl,
+    source: payload.source || 'TorBox',
+    debug: payload.debug || null
+  };
+}
+
 function imdbCacheGet(tmdbId) {
   var entry = IMDB_CACHE[tmdbId];
   if (!entry) return null;
@@ -438,6 +464,64 @@ async function createStreamForTorrent(torrentId, files, type, season, episode, c
   };
 }
 
+// Direct CDN playback fallback (raw view) for plans without web streaming.
+async function requestDlUrl(torrentId, fileId) {
+  var path = '/torrents/requestdl?token=' + encodeURIComponent(TORBOX_KEY) +
+    '&torrent_id=' + torrentId + '&file_id=' + fileId + '&redirect=false';
+  var res = await torboxRequest(path, 'GET', null, 8000);
+  if (!res || !res.ok) return null;
+  var json = res.json;
+  if (!json || !json.success || !json.data) return null;
+  return json.data;
+}
+
+function isBrowserPlayableFile(files, fileId, cand) {
+  var codec = parseCodec(cand && cand.title);
+  if (codec === 'hevc') return false;
+  var f = null;
+  if (Array.isArray(files)) {
+    f = files.find(function (x) { return String(x.id) === String(fileId); });
+  }
+  var name = ((f && (f.name || f.short_name)) || '').toLowerCase();
+  var mime = (f && f.mimetype) || '';
+  var extOk = /\.(mp4|webm|mov|mkv|m4v|ts|avi)$/i.test(name);
+  var mimeOk = mime.indexOf('video/') === 0;
+  return extOk || mimeOk;
+}
+
+// Prefer HLS; fall back to a direct CDN URL when the plan blocks createstream.
+async function resolveStreamOrDirect(torrentId, files, type, season, episode, cand) {
+  var stream = await createStreamForTorrent(torrentId, files, type, season, episode, cand);
+  if (stream && stream.hlsUrl) return stream;
+  var code = stream && stream.torboxError;
+  if (code === 'PLAN_RESTRICTED_FEATURE' || code === 'plan_restricted_feature' || code === 'no_hls' || code === 'stream_failed') {
+    var fileId = pickVideoFile(files || [], type, season, episode, cand);
+    if (!isBrowserPlayableFile(files, fileId, cand)) {
+      return {
+        error: 'This file type can\'t play in the browser on your current TorBox plan. Upgrade your plan or pick a different server.',
+        torboxError: 'not_browser_playable',
+        fileId: fileId
+      };
+    }
+    var directUrl = await requestDlUrl(torrentId, fileId);
+    if (!directUrl) {
+      return stream || { error: 'Could not create a direct playback URL for this file.', torboxError: 'requestdl_failed' };
+    }
+    return {
+      directUrl: directUrl,
+      source: buildSourceMeta(cand),
+      debug: {
+        hash: cand ? cand.cleanHash : null,
+        torrentId: torrentId,
+        fileId: fileId,
+        codec: parseCodec(cand && cand.title),
+        direct: true
+      }
+    };
+  }
+  return stream;
+}
+
 async function startTorrentDownload(cand, type, season, episode) {
   var hash = cand.cleanHash;
   var magnet = 'magnet:?xt=urn:btih:' + hash;
@@ -508,11 +592,11 @@ async function processProgressPoll(req) {
   }
 
   var cand = hash ? { cleanHash: String(hash).toLowerCase(), title: title || '' } : null;
-  var stream = await createStreamForTorrent(torrentId, prog.files, type, season, episode, cand);
-  if (!stream || !stream.hlsUrl) {
+  var stream = await resolveStreamOrDirect(torrentId, prog.files, type, season, episode, cand);
+  if (!stream || (!stream.hlsUrl && !stream.directUrl)) {
     return {
       status: 404,
-      payload: { error: (stream && stream.error) || 'Could not start streaming this torrent.', torboxError: (stream && stream.torboxError) || 'stream_failed' }
+      payload: { error: (stream && stream.error) || 'Could not start streaming this torrent.', torboxError: (stream && stream.torboxError) || 'stream_failed', fileId: stream && stream.fileId }
     };
   }
   return { status: 200, payload: stream };
@@ -545,7 +629,7 @@ async function buildTorBoxStream(candidates, type, season, episode) {
     return { error: 'Torrent is cached but could not be added to your TorBox account.', torboxError: 'no_torrent_id' };
   }
 
-  return await createStreamForTorrent(torrentId, cachedFiles, type, season, episode, best.cand);
+  return await resolveStreamOrDirect(torrentId, cachedFiles, type, season, episode, best.cand);
 }
 
 // ---- Main pipeline (hybrid: client scrapes in-browser, server talks to TorBox) ----
@@ -608,7 +692,7 @@ async function processStreamRequest(req) {
     trCacheSet(trKey, shareHashes);
     upstashTrSet(trKey, shareHashes);
   }
-  if (torBoxResult && torBoxResult.hlsUrl) {
+  if (torBoxResult && (torBoxResult.hlsUrl || torBoxResult.directUrl)) {
     return { status: 200, payload: torBoxResult };
   }
   if (torBoxResult && torBoxResult.error) {
@@ -661,13 +745,9 @@ export default async function handler(req, res) {
 
   if (req.query.action === 'progress') {
     var pollResult = await processProgressPoll(req);
-    if (pollResult.status === 200 && pollResult.payload && pollResult.payload.hlsUrl) {
+    if (pollResult.status === 200 && pollResult.payload && (pollResult.payload.hlsUrl || pollResult.payload.directUrl)) {
       var pollKey = type + ':' + tmdbId + ':' + season + ':' + episode;
-      var pollStore = {
-        hlsUrl: pollResult.payload.hlsUrl,
-        source: pollResult.payload.source || 'TorBox',
-        debug: pollResult.payload.debug || null
-      };
+      var pollStore = toCacheStore(pollResult.payload);
       cacheSet(pollKey, pollStore);
       upstashSet(pollKey, pollStore, UPSTASH_RESULT_TTL);
     }
@@ -678,13 +758,13 @@ export default async function handler(req, res) {
   var refresh = req.query.refresh === '1' || req.query.refresh === 'true';
 
   if (!refresh) {
-    var cached = cacheGet(cacheKey);
+    var cached = normalizeCachedPayload(cacheGet(cacheKey));
     if (cached) {
       cached.cached = true;
       return res.status(200).json(cached);
     }
-    var shared = await upstashGet(cacheKey);
-    if (shared && shared.hlsUrl) {
+    var shared = normalizeCachedPayload(await upstashGet(cacheKey));
+    if (shared) {
       cacheSet(cacheKey, shared);
       shared.cached = 'shared';
       return res.status(200).json(shared);
@@ -703,12 +783,8 @@ export default async function handler(req, res) {
       timeoutPromise
     ]);
 
-    if (result.status === 200 && result.payload && result.payload.hlsUrl) {
-      var toStore = {
-        hlsUrl: result.payload.hlsUrl,
-        source: result.payload.source || 'TorBox',
-        debug: result.payload.debug || null
-      };
+    if (result.status === 200 && result.payload && (result.payload.hlsUrl || result.payload.directUrl)) {
+      var toStore = toCacheStore(result.payload);
       cacheSet(cacheKey, toStore);
       upstashSet(cacheKey, toStore, UPSTASH_RESULT_TTL);
     }
