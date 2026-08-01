@@ -394,7 +394,6 @@ async function processStreamRequest(req) {
 
   var trKey = 'tr:' + imdbId + ':' + season + ':' + episode;
   var provided = extractCandidates(req);
-  var usedShared = false;
 
   // 2. Use hashes the client scraped in its own browser, or a shared cache
   var candidates = null;
@@ -405,7 +404,6 @@ async function processStreamRequest(req) {
     if (!sharedHashes) sharedHashes = await upstashTrGet(trKey);
     if (sharedHashes && sharedHashes.length) {
       candidates = sharedHashes.map(function (h) { return { cleanHash: String(h).toLowerCase(), title: '' }; });
-      usedShared = true;
     }
   }
 
@@ -418,16 +416,18 @@ async function processStreamRequest(req) {
   var torBoxResult = await buildTorBoxStream(candidates, type, season, episode);
   if (torBoxResult) {
     torBoxResult.imdbId = imdbId;
-    if (provided && provided.length) {
-      var shareHashes = provided.map(function (c) { return c.cleanHash; });
-      trCacheSet(trKey, shareHashes);
-      upstashTrSet(trKey, shareHashes);
-    }
+  }
+  if (provided && provided.length) {
+    var shareHashes = provided.map(function (c) { return c.cleanHash; });
+    trCacheSet(trKey, shareHashes);
+    upstashTrSet(trKey, shareHashes);
+  }
+  if (torBoxResult) {
     return { status: 200, payload: torBoxResult };
   }
 
   // 5. Clear error (never 502)
-  return { status: 404, payload: { error: 'Torrent streams found but none are cached on TorBox.', imdbId: imdbId, noCached: true, sharedHashes: usedShared } };
+  return { status: 404, payload: { error: 'Torrent streams found but none are cached on TorBox.', imdbId: imdbId, noCached: true } };
 }
 
 // ---- Exported handler ----

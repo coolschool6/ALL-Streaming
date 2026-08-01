@@ -1288,7 +1288,7 @@
         if (!data.hlsUrl) throw new Error('No HLS URL');
         resolve(data);
       }).catch(function (err) {
-        if (err && err.noCached && !err.sharedHashes) {
+        if (err && err.noCached) {
           var e = new Error('No cached torrent');
           e.noCached = true;
           reject(e);
