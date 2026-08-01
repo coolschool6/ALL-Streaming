@@ -871,10 +871,10 @@ export default async function handler(req, res) {
     }
   }
 
-  var timeoutPromise = new Promise(function (resolve) {
+    var timeoutPromise = new Promise(function (resolve) {
     setTimeout(function () {
-      resolve({ status: 404, payload: { error: 'Stream lookup timed out. Try again or use the server selector.' } });
-    }, 9500);
+      resolve({ status: 404, payload: { error: 'Stream lookup timed out. Retrying in the app...' } });
+    }, 30000);
   });
 
   try {

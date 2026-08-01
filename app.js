@@ -1308,8 +1308,26 @@
     });
   }
 
-  function resolveHybridStream(item, type, sNum, eNum) {
+  function isRetryableStreamError(err) {
+    var msg = '';
+    if (err && typeof err === 'string') msg = err;
+    else if (err && err.error) msg = err.error;
+    else if (err && err.message) msg = err.message;
+    msg = String(msg || '').toLowerCase();
+    return msg.indexOf('timed out') !== -1 || msg.indexOf('retrying in the app') !== -1 || msg.indexOf('server error has occurred') !== -1;
+  }
+
+  function retryAfterDelay(fn, delayMs) {
+    return new Promise(function (resolve) {
+      setTimeout(function () {
+        resolve(fn());
+      }, delayMs);
+    });
+  }
+
+  function resolveHybridStream(item, type, sNum, eNum, retryCount) {
     return new Promise(function (resolve, reject) {
+      var timeoutRetries = retryCount || 0;
       var url = '/api/torbox-source?tmdbId=' + item.id + '&type=' + type;
       if (type === 'tv') url += '&season=' + sNum + '&episode=' + eNum;
       if (forceRefresh) url += '&refresh=1';
@@ -1353,6 +1371,13 @@
         resolve(data);
       }).catch(function (err) {
         clearTimeout(timeout);
+        if (isRetryableStreamError(err) && timeoutRetries < 1) {
+          showLoader(true, 'Stream is still preparing. Retrying...');
+          retryAfterDelay(function () {
+            return resolveHybridStream(item, type, sNum, eNum, timeoutRetries + 1).then(resolve, reject);
+          }, 3000).catch(reject);
+          return;
+        }
         var imdbId = err && err.imdbId;
         if (!imdbId) { reject(err); return; }
         scrapeAndDownload(imdbId);
@@ -1391,6 +1416,11 @@
         }).catch(function (err) {
           clearTimeout(t);
           failures++;
+          if (isRetryableStreamError(err)) {
+            showLoader(true, 'Stream is still preparing. Retrying...');
+            setTimeout(tick, POLL_INTERVAL);
+            return;
+          }
           if (Date.now() - started <= MAX_WAIT && failures < 4) {
             setTimeout(tick, POLL_INTERVAL);
           } else {
