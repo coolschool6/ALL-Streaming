@@ -148,12 +148,10 @@
   var currentLang = localStorage.getItem('asfr_lang') || 'en';
 
   var SERVERS = [
-    { name: 'Server 1 (2Embed - Default)', type: '2embed', movie: 'https://www.2embed.cc/embed/', tv: 'https://www.2embed.cc/embedtv/' },
-    { name: 'Server 2 (AutoEmbed)', type: 'path', movie: 'https://player.autoembed.cc/embed/movie/', tv: 'https://player.autoembed.cc/embed/tv/' },
-    { name: 'Server 3 (VidSrc.xyz)', type: 'query', movie: 'https://vidsrc.xyz/embed/movie?tmdb=', tv: 'https://vidsrc.xyz/embed/tv?tmdb=' },
-    { name: 'Server 4 (VidSrc.me)', type: 'query', movie: 'https://vidsrc.me/embed/movie?tmdb=', tv: 'https://vidsrc.me/embed/tv?tmdb=' },
-    { name: 'Server 5 (SmashyStream)', type: 'query', movie: 'https://embed.smashystream.com/playere.php?tmdb=', tv: 'https://embed.smashystream.com/playere.php?tmdb=' },
-    { name: 'Server 6 (VidLink)', type: 'path', movie: 'https://vidlink.pro/movie/', tv: 'https://vidlink.pro/tv/' }
+    { name: 'Server 1 (VidSrc.me)', type: 'query', movie: 'https://vidsrc.me/embed/movie?tmdb=', tv: 'https://vidsrc.me/embed/tv?tmdb=' },
+    { name: 'Server 2 (VidLink)', type: 'path', movie: 'https://vidlink.pro/movie/', tv: 'https://vidlink.pro/tv/' },
+    { name: 'Server 3 (SmashyStream)', type: 'query', movie: 'https://embed.smashystream.com/playere.php?tmdb=', tv: 'https://embed.smashystream.com/playere.php?tmdb=' },
+    { name: 'Server 4 (2Embed)', type: '2embed', movie: 'https://www.2embed.cc/embed/', tv: 'https://www.2embed.cc/embedtv/' }
   ];
 
   var content = document.getElementById('content');
@@ -196,15 +194,21 @@
   var hlsInstance = null;
   var plyrInstance = null;
   var customActive = false;
-  var sourceCache = { url: null, hlsUrl: null, ready: false };
+  var sourceCache = { url: null, hlsUrl: null, ready: false, warm: false };
   var healingInProgress = false;
   var forceRefresh = false;
   var prefetchInFlight = {};
   var prefetchPromises = {};
-  var tvDataCache = {};
-  var seasonEpisodes = {};
   var lastProgressSave = 0;
   var PLAYBACK_SAVE_INTERVAL = 5000;
+  var currentPlaybackId = null;
+  var playbackCounter = 0;
+  var resumeTarget = null;
+
+  function newPlaybackId() {
+    playbackCounter++;
+    return playbackCounter;
+  }
 
   function initServerSelector() {
     if (document.getElementById('server-select')) {
@@ -435,9 +439,88 @@
     return section;
   }
 
+  function renderContinueWatching() {
+    var existing = document.getElementById('continue-watching');
+    if (existing) existing.remove();
+    var map = {};
+    try { map = JSON.parse(localStorage.getItem(PROGRESS_KEY) || '{}'); } catch (err) { map = {}; }
+    var entries = [];
+    Object.keys(map).forEach(function (key) {
+      var entry = map[key];
+      if (!entry || !entry.title) return;
+      var parts = key.split(':');
+      if (parts.length < 4) return;
+      entries.push({ type: parts[0], id: parts[1], s: parts[2], e: parts[3], entry: entry });
+    });
+    entries.sort(function (a, b) { return (b.entry.t || 0) - (a.entry.t || 0); });
+    if (!entries.length) return;
+
+    var section = document.createElement('div');
+    section.className = 'category-row';
+    section.id = 'continue-watching';
+    section.setAttribute('data-type', 'all');
+    var header = document.createElement('div');
+    header.className = 'row-header';
+    var h2 = document.createElement('h2');
+    h2.className = 'row-title';
+    h2.textContent = 'Continue Watching';
+    header.appendChild(h2);
+    section.appendChild(header);
+
+    var track = document.createElement('div');
+    track.className = 'cards-track';
+    entries.slice(0, 12).forEach(function (cw) {
+      var card = document.createElement('div');
+      card.className = 'card continue-card';
+      card.setAttribute('data-type', cw.type);
+      card.setAttribute('data-id', cw.id);
+      var poster = document.createElement('div');
+      poster.className = 'card-poster';
+      var img = document.createElement('img');
+      img.loading = 'lazy';
+      img.src = cw.entry.poster ? imgURL(cw.entry.poster, 'w342') : '';
+      img.alt = cw.entry.title;
+      poster.appendChild(img);
+      var pct = (cw.entry.dur > 0) ? Math.min(100, Math.round((cw.entry.pos / cw.entry.dur) * 100)) : 0;
+      var bar = document.createElement('div');
+      bar.className = 'continue-progress';
+      var fill = document.createElement('div');
+      fill.className = 'continue-progress-fill';
+      fill.style.width = pct + '%';
+      bar.appendChild(fill);
+      poster.appendChild(bar);
+      var badge = document.createElement('span');
+      badge.className = 'continue-label';
+      badge.textContent = cw.type === 'tv' ? 'Continue S' + cw.s + 'E' + cw.e : 'Continue';
+      poster.appendChild(badge);
+      card.appendChild(poster);
+      var info = document.createElement('div');
+      info.className = 'card-info';
+      var name = document.createElement('div');
+      name.className = 'card-name';
+      name.textContent = cw.entry.title;
+      info.appendChild(name);
+      var sub = document.createElement('div');
+      sub.className = 'card-year';
+      sub.textContent = cw.type === 'tv' ? 'S' + cw.s + ' \u00b7 E' + cw.e : fmtTime(Math.max(0, cw.entry.dur - cw.entry.pos)) + ' left';
+      info.appendChild(sub);
+      card.appendChild(info);
+      card.addEventListener('click', function () {
+        var item = { id: cw.id, title: cw.entry.title, poster_path: cw.entry.poster };
+        resumeTarget = { type: cw.type, s: cw.s, e: cw.e };
+        openPlayer(item, cw.type);
+      });
+      track.appendChild(card);
+    });
+    section.appendChild(track);
+    content.insertBefore(section, content.firstChild);
+  }
+
   function createCard(item, mediaType) {
     var card = document.createElement('div');
     card.className = 'card';
+    card.setAttribute('data-type', mediaType);
+    card.setAttribute('data-id', item.id);
     var poster = document.createElement('div');
     poster.className = 'card-poster';
     var img = document.createElement('img');
@@ -488,6 +571,8 @@
   function createTopCard(item, mediaType, rank) {
     var card = document.createElement('div');
     card.className = 'top-card';
+    card.setAttribute('data-type', mediaType);
+    card.setAttribute('data-id', item.id);
     var num = document.createElement('div');
     num.className = 'top-number';
     num.textContent = rank;
@@ -502,7 +587,13 @@
     card.appendChild(posterWrap);
     card.addEventListener('click', function () { openDetail(item, mediaType); });
     card.addEventListener('mouseenter', function () {
-      scheduleHoverPrefetch(item, mediaType === 'tv' ? 'tv' : 'movie');
+      scheduleHoverPrefetch(item, mediaType === 'tv' ? 'tv' : 'movie', card);
+    });
+    card.addEventListener('mouseleave', function () {
+      if (card._hoverTimer) { clearTimeout(card._hoverTimer); card._hoverTimer = null; }
+      var badge = card.querySelector('.card-warm-badge');
+      if (badge) badge.remove();
+      card.classList.remove('card--warming');
     });
     return card;
   }
@@ -520,7 +611,12 @@
     detailWatch.onclick = function () { closeDetail(); openPlayer(item, mediaType); };
     detailModal.classList.add('active');
     document.body.style.overflow = 'hidden';
-    if (mediaType !== 'tv') preFetchSource(item, mediaType);
+    if (mediaType !== 'tv') {
+      detailWatch.textContent = 'Watch now';
+      var prog = progressGet('movie', item.id, 1, 1);
+      if (prog && prog.pos > 15) detailWatch.textContent = 'Resume \u00b7 ' + fmtTime(prog.pos);
+      preFetchSource(item, mediaType).catch(function () {});
+    }
   }
 
   /* ===== FULL-PAGE SHOW VIEW ===== */
@@ -587,7 +683,7 @@
 
       renderSeasonEpisodes(item.id, 1);
       renderSimilarShows(item.id);
-      preFetchSource(item, 'tv', 1, 1);
+      preFetchSource(item, 'tv', 1, 1).catch(function () {});
     });
   }
 
@@ -691,7 +787,7 @@
       showSynopsis.appendChild(synText);
 
       if (episodes.length > 0 && currentShowData) {
-        preFetchSource(currentShowData, 'tv', seasonNum, episodes[0].episode_number);
+        preFetchSource(currentShowData, 'tv', seasonNum, episodes[0].episode_number).catch(function () {});
       }
     });
   }
@@ -742,7 +838,33 @@
     return server.tv + id + '/' + season + '/' + episode;
   }
 
+  function populateQualityChips(levels) {
+    var settingsEl = document.getElementById('player-settings');
+    if (!settingsEl) return;
+    var group = settingsEl.querySelector('.setting-group[data-group="quality"]');
+    if (!group) return;
+    var chips = group.querySelectorAll('.setting-chip');
+    for (var i = 0; i < chips.length; i++) chips[i].remove();
+    function addChip(value, label, active) {
+      var chip = document.createElement('span');
+      chip.className = 'setting-chip' + (active ? ' setting-chip--active' : '');
+      chip.setAttribute('data-setting', 'quality');
+      chip.setAttribute('data-value', value);
+      chip.textContent = label;
+      group.appendChild(chip);
+    }
+    addChip('default', 'Auto', true);
+    var heights = [];
+    var seen = {};
+    (levels || []).forEach(function (l) {
+      if (l.height && !seen[l.height]) { seen[l.height] = true; heights.push(l.height); }
+    });
+    heights.sort(function (a, b) { return b - a; });
+    heights.forEach(function (h) { addChip(String(h), h + 'p', false); });
+  }
+
   function initCustomPlayer(sourceUrl, sourceName) {
+    var pid = currentPlaybackId;
     var video = document.getElementById('hls-video');
     var iframe = document.getElementById('player-iframe');
     var label = document.getElementById('source-label');
@@ -755,24 +877,37 @@
     iframe.style.display = 'none';
     video.style.display = 'block';
     video.removeAttribute('src');
-    if (label) { label.textContent = sourceName || ''; label.style.display = sourceName ? 'block' : 'none'; }
+    if (label) {
+      label.textContent = sourceName || '';
+      label.style.display = sourceName ? 'block' : 'none';
+      label.classList.toggle('warm', !!sourceCache.warm);
+    }
+
+    attachPlaybackEvents();
+    video.addEventListener('loadedmetadata', function () {
+      if (currentPlaybackId !== pid) return;
+      resumeFromCache(video);
+    }, { once: true });
 
     var isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) && /AppleWebKit/.test(navigator.userAgent);
 
     if (video.canPlayType('application/vnd.apple.mpegurl') || isIOS) {
       video.src = sourceUrl;
       video.addEventListener('loadedmetadata', function () {
+        if (currentPlaybackId !== pid) return;
         if (typeof Plyr !== 'undefined') {
           plyrInstance = new Plyr(video, {
-            controls: ['play-large', 'play', 'progress', 'current-time', 'duration', 'mute', 'volume', 'fullscreen'],
-            settings: ['speed']
+            controls: ['play-large', 'play', 'progress', 'current-time', 'duration', 'mute', 'volume', 'settings', 'fullscreen'],
+            settings: ['speed'],
+            speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 2] }
           });
         }
         showLoader(false);
         video.play().catch(function () {});
       }, { once: true });
       video.addEventListener('error', function () {
-        handleCustomPlayerFailure();
+        if (currentPlaybackId !== pid) return;
+        onPlaybackError();
       }, { once: true });
     } else if (typeof Hls !== 'undefined' && Hls.isSupported()) {
       hlsInstance = new Hls({
@@ -793,11 +928,31 @@
       hlsInstance.loadSource(sourceUrl);
       hlsInstance.attachMedia(video);
       hlsInstance.on(Hls.Events.MANIFEST_PARSED, function () {
+        if (currentPlaybackId !== pid) return;
+        populateQualityChips(hlsInstance ? hlsInstance.levels : null);
         if (typeof Plyr !== 'undefined') {
+          var qualityOptions = [];
+          if (hlsInstance && hlsInstance.levels && hlsInstance.levels.length) {
+            var seenQ = {};
+            hlsInstance.levels.forEach(function (l) {
+              if (l.height && !seenQ[l.height]) { seenQ[l.height] = true; qualityOptions.push(l.height); }
+            });
+            qualityOptions.sort(function (a, b) { return b - a; });
+          }
           plyrInstance = new Plyr(video, {
-            controls: ['play-large', 'play', 'progress', 'current-time', 'duration', 'mute', 'volume', 'fullscreen', 'settings'],
+            controls: ['play-large', 'play', 'progress', 'current-time', 'duration', 'mute', 'volume', 'settings', 'fullscreen'],
             settings: ['quality', 'speed'],
-            speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 2] }
+            speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 2] },
+            quality: { default: qualityOptions.length ? qualityOptions[0] : 1080, options: qualityOptions.length ? qualityOptions : [1080, 720, 480] }
+          });
+          plyrInstance.on('qualitychange', function (q) {
+            if (!hlsInstance) return;
+            var target = (q && typeof q === 'object' && q.default) ? q.default : q;
+            var idx = -1;
+            for (var i = 0; i < hlsInstance.levels.length; i++) {
+              if (hlsInstance.levels[i].height === target) { idx = i; break; }
+            }
+            if (idx >= 0) hlsInstance.currentLevel = idx;
           });
         }
         showLoader(false);
@@ -805,9 +960,10 @@
       });
       hlsInstance.on(Hls.Events.ERROR, function (e, data) {
         if (data.fatal) {
+          if (currentPlaybackId !== pid) return;
           try { hlsInstance.destroy(); } catch (err) {}
           hlsInstance = null;
-          handleCustomPlayerFailure();
+          onPlaybackError();
         }
       });
     } else {
@@ -822,6 +978,7 @@
     customActive = false;
     if (hlsInstance) { try { hlsInstance.destroy(); } catch (e) {} hlsInstance = null; }
     if (plyrInstance) { try { plyrInstance.destroy(); } catch (e) {} plyrInstance = null; }
+    detachPlaybackEvents();
     var video = document.getElementById('hls-video');
     var iframe = document.getElementById('player-iframe');
     var label = document.getElementById('source-label');
@@ -852,7 +1009,9 @@
   }
 
   function fallbackToIframe() {
-    showPlayerError('Stream failed to play. Select a server from the dropdown.');
+    if (!currentMedia) return;
+    showPlayerError('Torrent stream unavailable - playing fallback server.');
+    loadServer(0);
   }
 
   var STREAM_CACHE_TTL = 24 * 60 * 60 * 1000;
@@ -889,14 +1048,15 @@
     try { localStorage.removeItem(streamCacheKey(type, id, season, episode)); } catch (e) {}
   }
 
-  function handleCustomPlayerFailure() {
+  function handleCustomPlayerFailure(err) {
     if (currentMedia) {
       streamCacheRemove(currentMedia.type, currentMedia.item.id,
         seasonSelect ? seasonSelect.value || 1 : 1,
         episodeSelect ? episodeSelect.value || 1 : 1);
       clearSourceCache();
     }
-    if (!healingInProgress && currentMedia) {
+    var noCached = !!(err && err.noCached);
+    if (!healingInProgress && currentMedia && !noCached) {
       healingInProgress = true;
       forceRefresh = true;
       attemptCustomPlayer().then(function () {
@@ -910,32 +1070,289 @@
     }
   }
 
+  function onPlaybackError() {
+    if (currentPlaybackId !== null && currentMedia && currentMedia.type === 'tv' && nextEpisode()) return;
+    handleCustomPlayerFailure();
+  }
+
+  function onPlaybackEnded() {
+    saveProgress(true);
+    if (currentMedia && currentMedia.type === 'tv') nextEpisode();
+  }
+
+  function onTimeUpdate() {
+    var now = Date.now();
+    if (now - lastProgressSave < PLAYBACK_SAVE_INTERVAL) return;
+    lastProgressSave = now;
+    saveProgress(false);
+  }
+
+  function attachPlaybackEvents() {
+    var video = document.getElementById('hls-video');
+    if (!video) return;
+    video.addEventListener('ended', onPlaybackEnded);
+    video.addEventListener('timeupdate', onTimeUpdate);
+  }
+
+  function detachPlaybackEvents() {
+    var video = document.getElementById('hls-video');
+    if (!video) return;
+    video.removeEventListener('ended', onPlaybackEnded);
+    video.removeEventListener('timeupdate', onTimeUpdate);
+  }
+
+  var PROGRESS_KEY = 'asfr_progress';
+  var PROGRESS_MAX = 120;
+  var PROGRESS_TTL = 7 * 24 * 60 * 60 * 1000;
+
+  function progressKey(type, id, s, e) {
+    return type + ':' + id + ':' + (s || 1) + ':' + (e || 1);
+  }
+
+  function progressGet(type, id, s, e) {
+    try {
+      var raw = localStorage.getItem(PROGRESS_KEY);
+      if (!raw) return null;
+      var map = JSON.parse(raw);
+      var entry = map[progressKey(type, id, s, e)];
+      if (!entry) return null;
+      if (Date.now() - entry.t > PROGRESS_TTL) {
+        delete map[progressKey(type, id, s, e)];
+        persistProgress(map);
+        return null;
+      }
+      return entry;
+    } catch (err) { return null; }
+  }
+
+  function persistProgress(map) {
+    try { localStorage.setItem(PROGRESS_KEY, JSON.stringify(map)); } catch (err) {}
+  }
+
+  function removeProgress(type, id, s, e) {
+    try {
+      var map = JSON.parse(localStorage.getItem(PROGRESS_KEY) || '{}');
+      delete map[progressKey(type, id, s, e)];
+      persistProgress(map);
+    } catch (err) {}
+  }
+
+  function saveProgress(final) {
+    if (!currentMedia) return;
+    var video = document.getElementById('hls-video');
+    if (!video) return;
+    var dur = video.duration;
+    if (!isFinite(dur) || dur <= 0) return;
+    var pos = video.currentTime;
+    var pct = pos / dur;
+    if (pct >= 0.98) {
+      if (final) removeProgress(currentMedia.type, currentMedia.item.id, currentMedia.s || 1, currentMedia.e || 1);
+      return;
+    }
+    if (pct < 0.02) return;
+    try {
+      var map = JSON.parse(localStorage.getItem(PROGRESS_KEY) || '{}');
+      map[progressKey(currentMedia.type, currentMedia.item.id, currentMedia.s || 1, currentMedia.e || 1)] = {
+        pos: pos,
+        dur: dur,
+        t: Date.now(),
+        title: currentMedia.item.title || currentMedia.item.name || '',
+        poster: currentMedia.item.poster_path || currentMedia.item.backdrop_path || ''
+      };
+      var keys = Object.keys(map);
+      if (keys.length > PROGRESS_MAX) {
+        keys.sort(function (a, b) { return map[a].t - map[b].t; });
+        for (var i = 0; i < keys.length - PROGRESS_MAX; i++) delete map[keys[i]];
+      }
+      persistProgress(map);
+    } catch (err) {}
+  }
+
+  function resumeFromCache(video) {
+    if (!currentMedia || !video) return;
+    var prog = progressGet(currentMedia.type, currentMedia.item.id, currentMedia.s || 1, currentMedia.e || 1);
+    if (prog && prog.pos > 15 && prog.pos < (prog.dur || Infinity) * 0.96) {
+      try { video.currentTime = prog.pos; } catch (err) {}
+    }
+  }
+
+  function fmtTime(sec) {
+    if (!isFinite(sec) || sec < 0) sec = 0;
+    var m = Math.floor(sec / 60);
+    var s = Math.floor(sec % 60);
+    if (m >= 60) {
+      var h = Math.floor(m / 60);
+      m = m % 60;
+      return h + ':' + (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+    }
+    return m + ':' + (s < 10 ? '0' : '') + s;
+  }
+
+  function nextEpisode() {
+    if (!currentMedia || currentMedia.type !== 'tv' || !episodeSelect || !seasonSelect) return false;
+    var curEp = parseInt(episodeSelect.value, 10) || 0;
+    var options = Array.prototype.slice.call(episodeSelect.options);
+    var idx = -1;
+    for (var i = 0; i < options.length; i++) {
+      if (parseInt(options[i].value, 10) === curEp) { idx = i; break; }
+    }
+    if (idx >= 0 && idx < options.length - 1) {
+      episodeSelect.value = options[idx + 1].value;
+      episodeSelect.dispatchEvent(new Event('change'));
+      return true;
+    }
+    var seasons = Array.prototype.slice.call(seasonSelect.options).map(function (o) { return parseInt(o.value, 10); }).sort(function (a, b) { return a - b; });
+    var sIdx = seasons.indexOf(parseInt(seasonSelect.value, 10));
+    if (sIdx >= 0 && sIdx < seasons.length - 1) {
+      seasonSelect.value = seasons[sIdx + 1].toString();
+      seasonSelect.dispatchEvent(new Event('change'));
+      return true;
+    }
+    return false;
+  }
+
+  function prevEpisode() {
+    if (!currentMedia || currentMedia.type !== 'tv' || !episodeSelect || !seasonSelect) return false;
+    var curEp = parseInt(episodeSelect.value, 10) || 0;
+    var options = Array.prototype.slice.call(episodeSelect.options);
+    var idx = -1;
+    for (var i = 0; i < options.length; i++) {
+      if (parseInt(options[i].value, 10) === curEp) { idx = i; break; }
+    }
+    if (idx > 0) {
+      episodeSelect.value = options[idx - 1].value;
+      episodeSelect.dispatchEvent(new Event('change'));
+      return true;
+    }
+    var seasons = Array.prototype.slice.call(seasonSelect.options).map(function (o) { return parseInt(o.value, 10); }).sort(function (a, b) { return a - b; });
+    var sIdx = seasons.indexOf(parseInt(seasonSelect.value, 10));
+    if (sIdx > 0) {
+      seasonSelect.value = seasons[sIdx - 1].toString();
+      seasonSelect.dispatchEvent(new Event('change'));
+      return true;
+    }
+    return false;
+  }
+
   function clearSourceCache() {
     sourceCache.url = null;
     sourceCache.hlsUrl = null;
     sourceCache.ready = false;
     sourceCache.source = '';
+    sourceCache.warm = false;
+  }
+
+  function browserScrapeStreams(imdbId, type, season, episode) {
+    var path = type === 'tv'
+      ? 'https://torrentio.strem.fun/stream/series/' + imdbId + ':' + season + ':' + episode + '.json'
+      : 'https://torrentio.strem.fun/stream/movie/' + imdbId + '.json';
+    var controller = new AbortController();
+    var timeout = setTimeout(function () { controller.abort(); }, 45000);
+    return fetch(path, { signal: controller.signal }).then(function (r) {
+      clearTimeout(timeout);
+      if (!r.ok) throw new Error('scraper status ' + r.status);
+      return r.json();
+    }).then(function (data) {
+      var out = [];
+      var seen = {};
+      (data.streams || []).forEach(function (s) {
+        var h = String(s.infoHash || '').trim().toLowerCase();
+        if (!/^[0-9a-f]{40}$/.test(h)) return;
+        if (seen[h]) return;
+        seen[h] = true;
+        out.push({ hash: h, title: s.title || '' });
+      });
+      return out;
+    }).catch(function (err) {
+      clearTimeout(timeout);
+      throw err;
+    });
+  }
+
+  function resolveHybridStream(item, type, sNum, eNum) {
+    return new Promise(function (resolve, reject) {
+      var url = '/api/torbox-source?tmdbId=' + item.id + '&type=' + type;
+      if (type === 'tv') url += '&season=' + sNum + '&episode=' + eNum;
+      if (forceRefresh) url += '&refresh=1';
+
+      var controller = new AbortController();
+      var timeout = setTimeout(function () { controller.abort(); }, 90000);
+
+      fetch(url, { signal: controller.signal, cache: 'no-store' }).then(function (r) {
+        clearTimeout(timeout);
+        return r.json().then(function (data) {
+          if (!r.ok) throw data;
+          return data;
+        });
+      }).then(function (data) {
+        if (!data.hlsUrl) throw new Error('No HLS URL');
+        resolve(data);
+      }).catch(function (err) {
+        if (err && err.noCached) {
+          var e = new Error('No cached torrent');
+          e.noCached = true;
+          reject(e);
+          return;
+        }
+        var imdbId = err && err.imdbId;
+        if (!imdbId) { reject(err); return; }
+        showLoader(true, 'Searching torrent sources (first lookup can take up to ~45s)...');
+        browserScrapeStreams(imdbId, type, sNum, eNum).then(function (streams) {
+          if (!streams || !streams.length) throw new Error('no torrents found');
+          return fetch('/api/torbox-source', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              tmdbId: item.id,
+              type: type,
+              season: sNum,
+              episode: eNum,
+              imdbId: imdbId,
+              streams: streams
+            })
+          }).then(function (r) {
+            return r.json().then(function (d) {
+              if (!r.ok) throw d;
+              return d;
+            });
+          });
+        }).then(function (data) {
+          if (!data || !data.hlsUrl) {
+            var e = new Error('No cached torrent');
+            e.noCached = true;
+            throw e;
+          }
+          resolve(data);
+        }).catch(function (e2) {
+          reject(e2);
+        });
+      });
+    });
   }
 
   function preFetchSource(item, type, season, episode) {
-    if (!item || !item.id) return;
+    if (!item || !item.id) return Promise.reject(new Error('no item'));
     var sNum = season || 1;
     var eNum = episode || 1;
     var url = '/api/torbox-source?tmdbId=' + item.id + '&type=' + type;
     if (type === 'tv') url += '&season=' + sNum + '&episode=' + eNum;
 
-    if (prefetchInFlight[url]) return;
+    if (prefetchPromises[url]) return prefetchPromises[url];
+
     var cached = streamCacheGet(type, item.id, sNum, eNum);
     if (cached) {
       sourceCache.hlsUrl = cached.url;
       sourceCache.source = cached.source || 'TorBox';
       sourceCache.url = url;
       sourceCache.ready = true;
-      return;
+      sourceCache.warm = true;
+      return Promise.resolve();
     }
 
     prefetchInFlight[url] = true;
-    fetch(url, { cache: 'no-store' }).then(function (r) {
+    var controller = new AbortController();
+    var timeout = setTimeout(function () { controller.abort(); }, 90000);
+    var p = fetch(url, { signal: controller.signal, cache: 'no-store' }).then(function (r) {
       if (!r.ok) throw new Error('status ' + r.status);
       return r.json();
     }).then(function (data) {
@@ -944,22 +1361,42 @@
       sourceCache.source = data.source || 'TorBox';
       sourceCache.url = url;
       sourceCache.ready = true;
+      sourceCache.warm = true;
       streamCacheSet(type, item.id, sNum, eNum, data.hlsUrl, data.source || 'TorBox');
-    }).catch(function () {}).finally(function () {
+    }).finally(function () {
+      clearTimeout(timeout);
       delete prefetchInFlight[url];
+      delete prefetchPromises[url];
     });
+    prefetchPromises[url] = p;
+    return p;
   }
 
-  function scheduleHoverPrefetch(item, mediaType) {
-    if (!item || !item.id) return;
-    var cardKey = item.id;
-    if (hoverTimers[cardKey]) {
-      clearTimeout(hoverTimers[cardKey]);
-      hoverTimers[cardKey] = null;
+  function scheduleHoverPrefetch(item, mediaType, cardEl) {
+    if (!item || !item.id || !cardEl) return;
+    if (cardEl._hoverTimer) {
+      clearTimeout(cardEl._hoverTimer);
+      cardEl._hoverTimer = null;
     }
-    hoverTimers[cardKey] = setTimeout(function () {
-      hoverTimers[cardKey] = null;
-      preFetchSource(item, mediaType);
+    cardEl._hoverTimer = setTimeout(function () {
+      cardEl._hoverTimer = null;
+      var badge = cardEl.querySelector('.card-warm-badge');
+      if (!badge) {
+        badge = document.createElement('span');
+        badge.className = 'card-warm-badge';
+        badge.textContent = 'Preloading';
+        cardEl.appendChild(badge);
+      }
+      cardEl.classList.add('card--warming');
+      preFetchSource(item, mediaType).then(function () {
+        cardEl.classList.remove('card--warming');
+        badge.textContent = 'Ready';
+        badge.classList.add('card-warm-badge--ready');
+        setTimeout(function () { badge.remove(); }, 1200);
+      }, function () {
+        cardEl.classList.remove('card--warming');
+        badge.remove();
+      });
     }, 300);
   }
 
@@ -970,9 +1407,46 @@
       var type = currentMedia.type;
       var sNum = seasonSelect ? seasonSelect.value || 1 : 1;
       var eNum = episodeSelect ? episodeSelect.value || 1 : 1;
+      currentMedia.s = sNum;
+      currentMedia.e = eNum;
       var url = '/api/torbox-source?tmdbId=' + item.id + '&type=' + type;
       if (type === 'tv') url += '&season=' + sNum + '&episode=' + eNum;
       if (forceRefresh) url += '&refresh=1';
+
+      function runHybrid() {
+        showLoader(true, 'Loading stream...');
+        resolveHybridStream(item, type, sNum, eNum).then(function (data) {
+          forceRefresh = false;
+          sourceCache.hlsUrl = data.hlsUrl;
+          sourceCache.source = data.source || 'TorBox';
+          sourceCache.url = url;
+          sourceCache.ready = true;
+          sourceCache.warm = false;
+          streamCacheSet(type, item.id, sNum, eNum, data.hlsUrl, data.source || 'TorBox');
+          initCustomPlayer(data.hlsUrl, data.source || 'TorBox');
+          resolve();
+        }).catch(function (err) {
+          forceRefresh = false;
+          reject(err);
+        });
+      }
+
+      var pf = prefetchPromises[url];
+      if (pf) {
+        showLoader(true, 'Loading stream...');
+        pf.then(function () {
+          sourceCache.warm = true;
+          if (sourceCache.ready && sourceCache.hlsUrl && sourceCache.url === url) {
+            initCustomPlayer(sourceCache.hlsUrl, sourceCache.source);
+            resolve();
+          } else {
+            runHybrid();
+          }
+        }, function () {
+          runHybrid();
+        });
+        return;
+      }
 
       if (!forceRefresh && sourceCache.url === url && sourceCache.ready && sourceCache.hlsUrl) {
         initCustomPlayer(sourceCache.hlsUrl, sourceCache.source);
@@ -985,55 +1459,48 @@
         sourceCache.source = cached.source || 'TorBox';
         sourceCache.url = url;
         sourceCache.ready = true;
+        sourceCache.warm = true;
         initCustomPlayer(cached.url, cached.source || 'TorBox');
         resolve(); return;
       }
 
-      showLoader(true, 'Fetching stream source (up to ~1.5 min)...');
-      var controller = new AbortController();
-      var timeout = setTimeout(function () { controller.abort(); }, 90000);
-
-      fetch(url, { signal: controller.signal, cache: 'no-store' }).then(function (r) {
-        clearTimeout(timeout);
-        if (!r.ok) throw new Error('status ' + r.status);
-        return r.json();
-      }).then(function (data) {
-        if (!data.hlsUrl) throw new Error('No HLS URL');
-        forceRefresh = false;
-        sourceCache.hlsUrl = data.hlsUrl;
-        sourceCache.source = data.source || 'TorBox';
-        sourceCache.url = url;
-        sourceCache.ready = true;
-        streamCacheSet(type, item.id, sNum, eNum, data.hlsUrl, data.source || 'TorBox');
-        initCustomPlayer(data.hlsUrl, data.source || 'TorBox');
-        resolve();
-      }).catch(function (err) {
-        clearTimeout(timeout);
-        forceRefresh = false;
-        reject(err);
-      });
+      runHybrid();
     });
   }
 
   function openPlayer(item, mediaType) {
     initServerSelector();
     currentMedia = { item: item, type: mediaType };
+    currentPlaybackId = newPlaybackId();
     playerTitle.textContent = item.title || item.name || '';
     playerIframe.setAttribute('allow', 'autoplay; encrypted-media; fullscreen; picture-in-picture');
     playerIframe.style.cssText = 'width:100%; height:100%; border:0; display:block;';
 
     document.getElementById('hls-video').style.display = 'none';
     playerIframe.src = 'about:blank';
-    showLoader(true, 'Loading stream...');
 
     if (mediaType === 'tv') {
       tvControls.style.display = 'flex';
       setupTVControls(item.id);
+      showLoader(true, 'Loading stream...');
     } else {
       tvControls.style.display = 'none';
-      attemptCustomPlayer().catch(function (err) {
-        showPlayerError('Could not load custom stream' + (err && err.message ? ' (' + err.message + ')' : '') + '. Use the server selector below.');
-      });
+      var sNum = 1;
+      var eNum = 1;
+      var warm = streamCacheGet(mediaType, item.id, sNum, eNum);
+      if (warm && warm.url) {
+        sourceCache.hlsUrl = warm.url;
+        sourceCache.source = warm.source || 'TorBox';
+        sourceCache.url = '/api/torbox-source?tmdbId=' + item.id + '&type=movie';
+        sourceCache.ready = true;
+        sourceCache.warm = true;
+        initCustomPlayer(warm.url, warm.source || 'TorBox');
+      } else {
+        showLoader(true, 'Loading stream...');
+        attemptCustomPlayer().catch(function () {
+          fallbackToIframe();
+        });
+      }
     }
     playerModal.classList.add('active');
     document.body.style.overflow = 'hidden';
@@ -1064,7 +1531,10 @@
   }
 
   function closePlayer() {
+    currentPlaybackId = null;
     destroyCustomPlayer();
+    saveProgress(true);
+    renderContinueWatching();
     clearSourceCache();
     playerIframe.src = 'about:blank';
     playerModal.classList.remove('active');
@@ -1082,7 +1552,11 @@
         opt.textContent = s.name || ('Season ' + s.season_number);
         seasonSelect.appendChild(opt);
       });
-      if (seasons.length) updateEpisodes(tvId, seasons[0].season_number);
+      if (seasons.length) {
+        var sNum = (resumeTarget && resumeTarget.type === 'tv' && resumeTarget.s) ? resumeTarget.s : seasons[0].season_number;
+        seasonSelect.value = sNum;
+        updateEpisodes(tvId, sNum);
+      }
     });
   }
 
@@ -1097,8 +1571,13 @@
         opt.textContent = 'E' + ep.episode_number + ' - ' + ep.name;
         episodeSelect.appendChild(opt);
       });
+      if (resumeTarget && resumeTarget.type === 'tv') {
+        episodeSelect.value = resumeTarget.e;
+        resumeTarget = null;
+      }
+      currentPlaybackId = newPlaybackId();
       attemptCustomPlayer().catch(function (err) {
-        showPlayerError('Could not load custom stream' + (err && err.message ? ' (' + err.message + ')' : '') + '. Use the server selector below.');
+        handleCustomPlayerFailure(err);
       });
     });
   }
@@ -1181,15 +1660,66 @@
     seasonSelect.addEventListener('change', function () { if (currentMedia) updateEpisodes(currentMedia.item.id, this.value); });
     episodeSelect.addEventListener('change', function () {
       if (currentMedia) {
+        currentPlaybackId = newPlaybackId();
         destroyCustomPlayer();
         showLoader(true, 'Loading stream...');
         playerIframe.src = 'about:blank';
         attemptCustomPlayer().catch(function (err) {
-          showPlayerError('Could not load custom stream' + (err && err.message ? ' (' + err.message + ')' : '') + '. Use the server selector below.');
+          handleCustomPlayerFailure(err);
         });
       }
     });
     playerClose.addEventListener('click', closePlayer);
+
+    var settingsEl = document.getElementById('player-settings');
+    if (settingsEl) {
+      settingsEl.addEventListener('click', function (e) {
+        var chip = e.target.closest('.setting-chip');
+        if (!chip) return;
+        var setting = chip.getAttribute('data-setting');
+        var value = chip.getAttribute('data-value');
+        var group = chip.closest('.setting-group');
+        var chips = group ? group.querySelectorAll('.setting-chip') : [];
+        for (var ci = 0; ci < chips.length; ci++) chips[ci].classList.remove('setting-chip--active');
+        chip.classList.add('setting-chip--active');
+        if (setting === 'quality') {
+          if (hlsInstance && hlsInstance.levels && hlsInstance.levels.length) {
+            hlsInstance.currentLevel = (value === 'default') ? -1 : parseInt(value, 10);
+          }
+        } else if (setting === 'speed') {
+          var v = parseFloat(value);
+          var video = document.getElementById('hls-video');
+          if (video && isFinite(v)) video.playbackRate = v;
+          if (plyrInstance) { try { plyrInstance.speed = v; } catch (err) {} }
+        } else if (setting === 'buffer') {
+          if (hlsInstance) {
+            var bs = parseInt(value, 10);
+            try {
+              hlsInstance.config.maxBufferLength = bs;
+              hlsInstance.config.maxBufferSize = bs * 1000 * 1000;
+            } catch (err) {}
+          }
+        } else if (setting === 'codec' && value === 'avc' && hlsInstance && hlsInstance.levels && hlsInstance.levels.length) {
+          var avcIdx = -1;
+          for (var ai = 0; ai < hlsInstance.levels.length; ai++) {
+            if (hlsInstance.levels[ai].attrs && /avc/i.test(hlsInstance.levels[ai].attrs.CODECS || '')) { avcIdx = ai; break; }
+          }
+          if (avcIdx >= 0) hlsInstance.currentLevel = avcIdx;
+        }
+      });
+    }
+
+    var skipBack = document.getElementById('player-skip-back');
+    var skipForward = document.getElementById('player-skip-forward');
+    if (skipBack) skipBack.addEventListener('click', function () {
+      var video = document.getElementById('hls-video');
+      if (video && isFinite(video.currentTime)) video.currentTime = Math.max(0, video.currentTime - 10);
+    });
+    if (skipForward) skipForward.addEventListener('click', function () {
+      var video = document.getElementById('hls-video');
+      if (video && isFinite(video.currentTime)) video.currentTime = Math.min(video.duration || video.currentTime, video.currentTime + 10);
+    });
+
     searchToggle.addEventListener('click', toggleSearch);
     searchInput.addEventListener('input', handleSearch);
     if (searchClose) searchClose.addEventListener('click', toggleSearch);
@@ -1238,6 +1768,37 @@
       var nav = document.querySelector('.navbar');
       if (nav) nav.classList.toggle('scrolled', window.scrollY > 50);
     });
+
+    // Keyboard shortcuts
+    window.asfr_prev_shortcut = function () {
+      return function () {
+        if (!playerModal.classList.contains('active')) return;
+        prevEpisode();
+      };
+    };
+    window.asfr_next_shortcut = function () {
+      return function () {
+        if (!playerModal.classList.contains('active')) return;
+        nextEpisode();
+      };
+    };
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') {
+        if (playerModal.classList.contains('active')) {
+          closePlayer();
+          e.preventDefault();
+        } else if (detailModal.classList.contains('active')) {
+          closeDetail();
+          e.preventDefault();
+        } else if (showModal.classList.contains('active')) {
+          closeShowPage();
+          e.preventDefault();
+        }
+        return;
+      }
+      var tag = (e.target && e.target.tagName) || '';
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    });
   }
 
   function loadContent() {
@@ -1264,6 +1825,7 @@
       fragment.appendChild(createCategoryRow('Popular Movies', results[2], 'movie', false));
       fragment.appendChild(createCategoryRow('Popular Shows', results[3], 'tv', false));
       content.appendChild(fragment);
+      renderContinueWatching();
       setFilter(currentFilter);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     });
