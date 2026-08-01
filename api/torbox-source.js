@@ -672,7 +672,10 @@ async function processStreamRequest(req) {
     var sharedHashes = trCacheGet(trKey);
     if (!sharedHashes) sharedHashes = await upstashTrGet(trKey);
     if (sharedHashes && sharedHashes.length) {
-      candidates = sharedHashes.map(function (h) { return { cleanHash: String(h).toLowerCase(), title: '' }; });
+      candidates = sharedHashes.map(function (h) {
+        if (typeof h === 'string') return { cleanHash: String(h).toLowerCase(), title: '' };
+        return { cleanHash: String(h.h || '').toLowerCase(), title: h.t || '' };
+      }).filter(function (c) { return c.cleanHash; });
     }
   }
 
@@ -688,9 +691,9 @@ async function processStreamRequest(req) {
     torBoxResult.imdbId = imdbId;
   }
   if (provided && provided.length) {
-    var shareHashes = provided.map(function (c) { return c.cleanHash; });
-    trCacheSet(trKey, shareHashes);
-    upstashTrSet(trKey, shareHashes);
+    var shareData = provided.map(function (c) { return { h: c.cleanHash, t: c.title || '' }; });
+    trCacheSet(trKey, shareData);
+    upstashTrSet(trKey, shareData);
   }
   if (torBoxResult && (torBoxResult.hlsUrl || torBoxResult.directUrl)) {
     return { status: 200, payload: torBoxResult };
