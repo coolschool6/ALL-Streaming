@@ -1294,6 +1294,24 @@
     });
   }
 
+  function fetchJson(url, options, contextLabel) {
+    return fetch(url, options).then(function (r) {
+      return r.text().then(function (text) {
+        var data = null;
+        try {
+          data = text ? JSON.parse(text) : {};
+        } catch (err) {
+          var snippet = (text || '').trim().slice(0, 120);
+          throw new Error((contextLabel || 'Server') + ' returned non-JSON response' + (snippet ? ': ' + snippet : ''));
+        }
+        if (!r.ok) {
+          throw data && data.error ? data : new Error((contextLabel || 'Server') + ' request failed with status ' + r.status);
+        }
+        return data;
+      });
+    });
+  }
+
   function resolveHybridStream(item, type, sNum, eNum) {
     return new Promise(function (resolve, reject) {
       var url = '/api/torbox-source?tmdbId=' + item.id + '&type=' + type;
@@ -1304,7 +1322,7 @@
         showLoader(true, 'Searching torrent sources (first lookup can take up to ~45s)...');
         browserScrapeStreams(imdbId, type, sNum, eNum).then(function (streams) {
           if (!streams || !streams.length) throw new Error('no torrents found');
-          return fetch('/api/torbox-source', {
+          return fetchJson('/api/torbox-source', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1316,12 +1334,7 @@
               streams: streams,
               download: true
             })
-          }).then(function (r) {
-            return r.json().then(function (d) {
-              if (!r.ok) throw d;
-              return d;
-            });
-          });
+          }, 'TorBox stream create');
         }).then(function (data) {
           if (data && data.downloading && data.torrentId) {
             return pollTorrentStream(item, type, sNum, eNum, data.torrentId, data.torrentHash, data.torrentTitle);
@@ -1338,16 +1351,12 @@
       var controller = new AbortController();
       var timeout = setTimeout(function () { controller.abort(); }, 90000);
 
-      fetch(url, { signal: controller.signal, cache: 'no-store' }).then(function (r) {
+      fetchJson(url, { signal: controller.signal, cache: 'no-store' }, 'TorBox stream lookup').then(function (data) {
         clearTimeout(timeout);
-        return r.json().then(function (data) {
-          if (!r.ok) throw data;
-          return data;
-        });
-      }).then(function (data) {
         if (!data.hlsUrl && !data.directUrl) throw new Error('No stream URL');
         resolve(data);
       }).catch(function (err) {
+        clearTimeout(timeout);
         var imdbId = err && err.imdbId;
         if (!imdbId) { reject(err); return; }
         scrapeAndDownload(imdbId);
@@ -1377,13 +1386,8 @@
         showLoader(true, 'Preparing stream (downloading to server)... ' + lastPct + '%');
         var controller = new AbortController();
         var t = setTimeout(function () { controller.abort(); }, 9000);
-        fetch(url, { signal: controller.signal, cache: 'no-store' }).then(function (r) {
+        fetchJson(url, { signal: controller.signal, cache: 'no-store' }, 'TorBox progress poll').then(function (data) {
           clearTimeout(t);
-          return r.json().then(function (data) {
-            if (!r.ok) throw data;
-            return data;
-          });
-        }).then(function (data) {
           if (data && (data.hlsUrl || data.directUrl)) { resolve(data); return; }
           if (data && typeof data.progress === 'number') lastPct = Math.round(data.progress);
           showLoader(true, 'Preparing stream (downloading to server)... ' + lastPct + '%');
@@ -1426,10 +1430,7 @@
     prefetchInFlight[url] = true;
     var controller = new AbortController();
     var timeout = setTimeout(function () { controller.abort(); }, 90000);
-    var p = fetch(url, { signal: controller.signal, cache: 'no-store' }).then(function (r) {
-      if (!r.ok) throw new Error('status ' + r.status);
-      return r.json();
-    }).then(function (data) {
+    var p = fetchJson(url, { signal: controller.signal, cache: 'no-store' }, 'TorBox prefetch').then(function (data) {
       if (!data.hlsUrl && !data.directUrl) throw new Error('No stream URL');
       sourceCache.hlsUrl = data.hlsUrl || null;
       sourceCache.directUrl = data.directUrl || null;
