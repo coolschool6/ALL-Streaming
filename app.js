@@ -912,6 +912,7 @@
     setShield(false);
     iframe.style.display = 'none';
     video.style.display = 'block';
+    video.controls = true;
     video.removeAttribute('src');
     if (label) {
       label.textContent = sourceName || '';
@@ -1012,13 +1013,18 @@
 
   function destroyCustomPlayer() {
     customActive = false;
+    var activeVideo = document.getElementById('hls-video');
+    if (activeVideo) {
+      try { activeVideo.pause(); } catch (e) {}
+      activeVideo.currentTime = 0;
+    }
     if (hlsInstance) { try { hlsInstance.destroy(); } catch (e) {} hlsInstance = null; }
     if (plyrInstance) { try { plyrInstance.destroy(); } catch (e) {} plyrInstance = null; }
     detachPlaybackEvents();
     var video = document.getElementById('hls-video');
     var iframe = document.getElementById('player-iframe');
     var label = document.getElementById('source-label');
-    if (video) { video.style.display = 'none'; video.removeAttribute('src'); }
+    if (video) { video.style.display = 'none'; video.removeAttribute('src'); video.controls = false; }
     if (iframe) { iframe.style.display = 'block'; }
     if (label) { label.style.display = 'none'; }
   }
@@ -1628,6 +1634,12 @@
     document.body.style.overflow = '';
   }
 
+  function handlePlayerBackdropClick(e) {
+    if (e.target === playerModal) {
+      closePlayer();
+    }
+  }
+
   function setupTVControls(tvId) {
     seasonSelect.innerHTML = '<option value="">Loading...</option>';
     fetchTMDB('/tv/' + tvId).then(function (tvData) {
@@ -1757,6 +1769,7 @@
       }
     });
     playerClose.addEventListener('click', closePlayer);
+    playerModal.addEventListener('click', handlePlayerBackdropClick);
 
     var settingsEl = document.getElementById('player-settings');
     if (settingsEl) {

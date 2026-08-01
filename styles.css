@@ -750,7 +750,27 @@ img {
   flex-direction: column;
   animation: fadeIn 0.3s ease;
   overflow: hidden;
+    min-height: 0;
 }
+
+  .player-controls {
+    position: sticky;
+    bottom: 0;
+    gap: 14px;
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+    background: rgba(10,10,12,0.96);
+    backdrop-filter: blur(10px);
+  }
+
+  .player-btn {
+    width: 40px;
+    height: 40px;
+  }
+
+  .player-btn svg {
+    width: 18px;
+    height: 18px;
+  }
 
 .player-modal.active {
   display: flex;
@@ -957,6 +977,8 @@ img {
   flex-shrink: 0;
   background: rgba(10,10,12,0.9);
   border-top: 1px solid rgba(255,255,255,0.06);
+  position: relative;
+  z-index: 4;
 }
 
 .player-btn {
