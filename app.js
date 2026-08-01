@@ -194,7 +194,36 @@
   var hlsInstance = null;
   var plyrInstance = null;
   var customActive = false;
-  var sourceCache = { url: null, hlsUrl: null, directUrl: null, direct: false, ready: false, warm: false };
+  var sourceCache = { url: null, hlsUrl: null, ready: false, warm: false };
+
+  // ===== CATALOG ENFORCEMENT =====
+  // Titles that fail playback audits get blocklisted here (baked into the app).
+  // Key format: 'movie:12345' or 'tv:67890' -> human-readable reason.
+  // Verified 2026-08-01 via automated playback audit: TorBox CDN returns
+  // HTTP 408/000 on every segment (never transcodes these files), so the
+  // player fails with DEMUXER_ERROR_COULD_NOT_PARSE. No UI clickable link is
+  // rendered for these titles — they show 'Unavailable' instead of a broken
+  // player. Re-test and remove entries once TorBox can serve them.
+  var CATALOG_BLOCKLIST = {
+    'movie:1081003': 'Supergirl — TorBox CDN cannot serve stream (segment 408s, codec misdetected as mjpeg)',
+    'movie:1339713': 'Obsession — TorBox CDN cannot serve stream (segment 408s, transcoding never completes)',
+    'movie:980431': 'Avatar Aang — TorBox CDN never serves segments (HTTP 000 timeouts on every poll)',
+    'tv:5920': 'The Mentalist — TorBox CDN cannot serve stream (segment 408s, transcoding never completes)'
+  };
+
+  function isTitleBlocked(mediaType, id) {
+    return !!CATALOG_BLOCKLIST[mediaType + ':' + id];
+  }
+
+  // True when the title's release/first-air date is more than a day in the
+  // future (same-day releases are considered available).
+  function isUnreleased(item) {
+    var d = item.release_date || item.first_air_date || '';
+    if (!d) return false;
+    var t = new Date(d).getTime();
+    if (isNaN(t)) return false;
+    return t > Date.now() + 86400000;
+  }
   var forceRefresh = false;
   var prefetchInFlight = {};
   var prefetchPromises = {};
@@ -203,6 +232,41 @@
   var currentPlaybackId = null;
   var playbackCounter = 0;
   var resumeTarget = null;
+  // One-shot recovery: transient CDN hiccups (408s while TorBox spins up
+  // transcoding) can kill the first hls.js attempt. Retry once with a fresh
+  // stream before declaring the title unplayable. Guarded by playback session
+  // (currentPlaybackId) so a persistently-broken stream can never loop.
+  var hlsFatalRetryPid = null;
+
+  function retryPlaybackAfterFatal() {
+    if (!currentMedia || hlsFatalRetryPid === currentPlaybackId) return false;
+    var retryPid = currentPlaybackId;
+    hlsFatalRetryPid = retryPid;
+    var item = currentMedia.item;
+    var type = currentMedia.type;
+    var sNum = seasonSelect ? seasonSelect.value || 1 : 1;
+    var eNum = episodeSelect ? episodeSelect.value || 1 : 1;
+    forceRefresh = true;
+    clearSourceCache();
+    showLoader(true, 'Stream hiccup \u2014 retrying with a fresh stream...');
+    resolveHybridStream(item, type, sNum, eNum).then(function (data) {
+      forceRefresh = false;
+      if (currentPlaybackId !== retryPid) return; // user moved on; drop stale retry
+      if (!data || !data.hlsUrl) throw new Error('No stream URL on retry');
+      sourceCache.hlsUrl = data.hlsUrl;
+      sourceCache.source = data.source || 'TorBox';
+      sourceCache.url = sourceApiUrl(item, type, sNum, eNum);
+      sourceCache.ready = true;
+      sourceCache.warm = false;
+      streamCacheSet(type, item.id, sNum, eNum, data.hlsUrl, data.source || 'TorBox');
+      initCustomPlayer(data.hlsUrl, data.source || 'TorBox');
+    }).catch(function (err) {
+      forceRefresh = false;
+      if (currentPlaybackId !== retryPid) return;
+      handleCustomPlayerFailure(err);
+    });
+    return true;
+  }
 
   function newPlaybackId() {
     playbackCounter++;
@@ -257,7 +321,9 @@
   }
 
   function initHero(items) {
-    heroItems = items.slice(0, 8);
+    heroItems = items.filter(function (it) {
+      return !isUnreleased(it) && !isTitleBlocked(it.media_type || 'movie', it.id);
+    }).slice(0, 8);
     heroIndex = 0;
     renderHeroItem();
     renderHeroDots();
@@ -403,7 +469,10 @@
         grid.innerHTML = '<div class="search-empty">No titles found for this provider.</div>';
         return;
       }
-      combined.forEach(function (item) { grid.appendChild(createCard(item, item.media_type)); });
+      combined.forEach(function (item) {
+        var c = createCard(item, item.media_type);
+        if (c) grid.appendChild(c);
+      });
     });
     window.scrollTo({ top: 300, behavior: 'smooth' });
   }
@@ -429,9 +498,11 @@
       var item = displayItems[i];
       var mediaType = item.media_type || type || 'movie';
       if (useTopStyle) {
-        track.appendChild(createTopCard(item, mediaType, i + 1));
+        var tc = createTopCard(item, mediaType, i + 1);
+        if (tc) track.appendChild(tc);
       } else {
-        track.appendChild(createCard(item, mediaType));
+        var cc = createCard(item, mediaType);
+        if (cc) track.appendChild(cc);
       }
     }
     section.appendChild(track);
@@ -469,6 +540,7 @@
     var track = document.createElement('div');
     track.className = 'cards-track';
     entries.slice(0, 12).forEach(function (cw) {
+      if (isTitleBlocked(cw.type, cw.id)) return; // never resurrect a dead title
       var card = document.createElement('div');
       card.className = 'card continue-card';
       card.setAttribute('data-type', cw.type);
@@ -516,6 +588,8 @@
   }
 
   function createCard(item, mediaType) {
+    if (isTitleBlocked(mediaType, item.id)) return null;
+    var unreleased = isUnreleased(item);
     var card = document.createElement('div');
     card.className = 'card';
     card.setAttribute('data-type', mediaType);
@@ -537,6 +611,14 @@
     }
 
     card.appendChild(poster);
+
+    if (unreleased) {
+      var urBadge = document.createElement('div');
+      urBadge.className = 'card-unreleased-badge';
+      urBadge.textContent = 'Available on a future date upon official release';
+      poster.appendChild(urBadge);
+      card.classList.add('card--unreleased');
+    }
 
     var info = document.createElement('div');
     info.className = 'card-info';
@@ -568,6 +650,8 @@
   }
 
   function createTopCard(item, mediaType, rank) {
+    if (isTitleBlocked(mediaType, item.id)) return null;
+    var unreleased = isUnreleased(item);
     var card = document.createElement('div');
     card.className = 'top-card';
     card.setAttribute('data-type', mediaType);
@@ -584,6 +668,13 @@
     img.src = src ? imgURL(src) : '';
     posterWrap.appendChild(img);
     card.appendChild(posterWrap);
+    if (unreleased) {
+      var urBadge = document.createElement('div');
+      urBadge.className = 'card-unreleased-badge';
+      urBadge.textContent = 'Available on a future date upon official release';
+      posterWrap.appendChild(urBadge);
+      card.classList.add('card--unreleased');
+    }
     card.addEventListener('click', function () { openDetail(item, mediaType); });
     card.addEventListener('mouseenter', function () {
       scheduleHoverPrefetch(item, mediaType === 'tv' ? 'tv' : 'movie', card);
@@ -607,14 +698,23 @@
     detailPoster.innerHTML = item.poster_path ? '<img src="' + imgURL(item.poster_path) + '" alt="">' : '';
     detailTitle.textContent = item.title || item.name || '';
     detailOverview.textContent = item.overview || '';
-    detailWatch.onclick = function () { closeDetail(); openPlayer(item, mediaType); };
     detailModal.classList.add('active');
     document.body.style.overflow = 'hidden';
     if (mediaType !== 'tv') {
-      detailWatch.textContent = 'Watch now';
-      var prog = progressGet('movie', item.id, 1, 1);
-      if (prog && prog.pos > 15) detailWatch.textContent = 'Resume \u00b7 ' + fmtTime(prog.pos);
-      preFetchSource(item, mediaType).catch(function () {});
+      if (isTitleBlocked(mediaType, item.id)) {
+        detailWatch.textContent = 'Unavailable';
+        detailWatch.disabled = true;
+      } else if (isUnreleased(item)) {
+        detailWatch.textContent = 'Available on a future date upon official release';
+        detailWatch.disabled = true;
+      } else {
+        detailWatch.textContent = 'Watch now';
+        detailWatch.disabled = false;
+        var prog = progressGet('movie', item.id, 1, 1);
+        if (prog && prog.pos > 15) detailWatch.textContent = 'Resume \u00b7 ' + fmtTime(prog.pos);
+        detailWatch.onclick = function () { closeDetail(); openPlayer(item, mediaType); };
+        preFetchSource(item, mediaType).catch(function () {});
+      }
     }
   }
 
@@ -641,6 +741,24 @@
     showSimilarTrack.innerHTML = '';
     showSynopsis.innerHTML = '';
     showTitle.textContent = item.name || item.title || '';
+    var toolbar = document.querySelector('#season-selector');
+    if (isTitleBlocked('tv', item.id)) {
+      episodesLoading.classList.remove('active');
+      showEpisodes.innerHTML = '';
+      var blErr = document.createElement('div');
+      blErr.className = 'search-empty';
+      blErr.textContent = 'This title is currently unavailable.';
+      showEpisodes.appendChild(blErr);
+      showMeta.innerHTML = '';
+      showBackdrop.style.backgroundImage = 'none';
+      seasonBtn.style.display = 'none';
+      seasonDropdown.innerHTML = '';
+      if (toolbar) toolbar.style.display = 'none';
+      currentShowData = null;
+      return;
+    }
+    if (toolbar) toolbar.style.display = '';
+    seasonBtn.style.display = '';
     seasonBtn.innerHTML = 'Season 1 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
     seasonDropdown.innerHTML = '';
     seasonDropdown.classList.remove('open');
@@ -651,6 +769,7 @@
 
     fetchTMDB('/tv/' + item.id).then(function (tvData) {
       currentShowData = tvData;
+      var showUnreleased = isUnreleased(tvData);
       var year = (tvData.first_air_date || '').substring(0, 4);
       var rating = tvData.vote_average ? tvData.vote_average.toFixed(1) : '';
       var seasons = (tvData.seasons || []).filter(function(s) { return s.season_number > 0; });
@@ -660,6 +779,7 @@
       if (year) metaHTML += '<span class="meta-item">' + year + '</span>';
       if (rating) metaHTML += '<span class="meta-dot"></span><span class="meta-item meta-rating meta-imdb">IMDb ' + rating + '</span>';
       if (seasonCount) metaHTML += '<span class="meta-dot"></span><span class="meta-item">' + seasonCount + ' Season' + (seasonCount !== 1 ? 's' : '') + '</span>';
+      if (showUnreleased) metaHTML += '<span class="meta-dot"></span><span class="meta-item meta-upcoming">Upcoming</span>';
       showMeta.innerHTML = metaHTML;
 
       seasonDropdown.innerHTML = '';
@@ -682,7 +802,7 @@
 
       renderSeasonEpisodes(item.id, 1);
       renderSimilarShows(item.id);
-      preFetchSource(item, 'tv', 1, 1).catch(function () {});
+      if (!showUnreleased) preFetchSource(item, 'tv', 1, 1).catch(function () {});
     });
   }
 
@@ -705,8 +825,9 @@
       var seasonName = seasonData.name || ('Season ' + seasonNum);
 
       episodes.forEach(function (ep) {
+        var epUnreleased = !!(ep.air_date && new Date(ep.air_date).getTime() > Date.now() + 86400000);
         var card = document.createElement('div');
-        card.className = 'episode-card';
+        card.className = 'episode-card' + (epUnreleased ? ' episode-card--unreleased' : '');
 
         var thumb = document.createElement('div');
         thumb.className = 'episode-thumb';
@@ -716,6 +837,12 @@
         thumbImg.src = thumbSrc ? imgURL(thumbSrc, 'w500') : '';
         thumbImg.alt = ep.name || '';
         thumb.appendChild(thumbImg);
+        if (epUnreleased) {
+          var epBadge = document.createElement('div');
+          epBadge.className = 'episode-unreleased-badge';
+          epBadge.textContent = 'Available on a future date upon official release';
+          thumb.appendChild(epBadge);
+        }
 
         var info = document.createElement('div');
         info.className = 'episode-info';
@@ -759,6 +886,7 @@
         card.appendChild(info);
 
         card.addEventListener('click', function () {
+          if (epUnreleased) return;
           openPlayer(currentShowData, 'tv');
           setTimeout(function () {
             if (seasonSelect) seasonSelect.value = seasonNum;
@@ -862,7 +990,63 @@
     heights.forEach(function (h) { addChip(String(h), h + 'p', false); });
   }
 
-  function initCustomPlayer(sourceUrl, sourceName, isDirect) {
+  function settingsGroup(name) {
+    var settingsEl = document.getElementById('player-settings');
+    if (!settingsEl) return null;
+    return settingsEl.querySelector('.setting-group[data-group="' + name + '"]');
+  }
+
+  function clearSettingGroup(group) {
+    if (!group) return;
+    var chips = group.querySelectorAll('.setting-chip');
+    for (var i = 0; i < chips.length; i++) chips[i].remove();
+  }
+
+  function addSettingChip(group, setting, value, label, active) {
+    if (!group) return;
+    var chip = document.createElement('span');
+    chip.className = 'setting-chip' + (active ? ' setting-chip--active' : '');
+    chip.setAttribute('data-setting', setting);
+    chip.setAttribute('data-value', value);
+    chip.textContent = label;
+    group.appendChild(chip);
+  }
+
+  // Populate the audio-track chips from the HLS manifest (multi-audio support).
+  function populateAudioTracks() {
+    var group = settingsGroup('audio');
+    if (!group || !hlsInstance) return;
+    clearSettingGroup(group);
+    var tracks = (hlsInstance.audioTracks || []).filter(function (t) { return t && t.id !== undefined; });
+    var current = hlsInstance.audioTrack;
+    addSettingChip(group, 'audio', '-1', 'Auto', current === -1);
+    var seen = {};
+    tracks.forEach(function (t) {
+      if (seen[t.id]) return;
+      seen[t.id] = true;
+      var label = t.name || t.lang || ('Track ' + t.id);
+      addSettingChip(group, 'audio', String(t.id), label, current === t.id);
+    });
+  }
+
+  // Populate the subtitle-track chips from the HLS manifest (embedded subs).
+  function populateSubtitleTracks() {
+    var group = settingsGroup('subs');
+    if (!group || !hlsInstance) return;
+    clearSettingGroup(group);
+    var tracks = (hlsInstance.subtitleTracks || []).filter(function (t) { return t && t.id !== undefined; });
+    var current = hlsInstance.subtitleTrack;
+    addSettingChip(group, 'subs', '-1', 'Off', current === -1);
+    var seen = {};
+    tracks.forEach(function (t) {
+      if (seen[t.id]) return;
+      seen[t.id] = true;
+      var label = t.name || t.lang || ('Subtitle ' + t.id);
+      addSettingChip(group, 'subs', String(t.id), label, current === t.id);
+    });
+  }
+
+  function initCustomPlayer(sourceUrl, sourceName) {
     var pid = currentPlaybackId;
     var video = document.getElementById('hls-video');
     var iframe = document.getElementById('player-iframe');
@@ -879,6 +1063,8 @@
     if (label) {
       label.textContent = sourceName || '';
       label.style.display = sourceName ? 'block' : 'none';
+      label.style.background = '';
+      label.style.padding = '';
       label.classList.toggle('warm', !!sourceCache.warm);
     }
 
@@ -890,7 +1076,7 @@
 
     var isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) && /AppleWebKit/.test(navigator.userAgent);
 
-    if (isDirect || video.canPlayType('application/vnd.apple.mpegurl') || isIOS) {
+    if (video.canPlayType('application/vnd.apple.mpegurl') || isIOS) {
       video.src = sourceUrl;
       video.addEventListener('loadedmetadata', function () {
         if (currentPlaybackId !== pid) return;
@@ -929,6 +1115,8 @@
       hlsInstance.on(Hls.Events.MANIFEST_PARSED, function () {
         if (currentPlaybackId !== pid) return;
         populateQualityChips(hlsInstance ? hlsInstance.levels : null);
+        populateAudioTracks();
+        populateSubtitleTracks();
         if (typeof Plyr !== 'undefined') {
           var qualityOptions = [];
           if (hlsInstance && hlsInstance.levels && hlsInstance.levels.length) {
@@ -962,8 +1150,24 @@
           if (currentPlaybackId !== pid) return;
           try { hlsInstance.destroy(); } catch (err) {}
           hlsInstance = null;
-          onPlaybackError();
+          if (!retryPlaybackAfterFatal()) onPlaybackError();
         }
+      });
+      hlsInstance.on(Hls.Events.AUDIO_TRACKS_UPDATED, function () {
+        if (currentPlaybackId !== pid) return;
+        populateAudioTracks();
+      });
+      hlsInstance.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, function () {
+        if (currentPlaybackId !== pid) return;
+        populateSubtitleTracks();
+      });
+      hlsInstance.on(Hls.Events.AUDIO_TRACK_SWITCHED, function () {
+        if (currentPlaybackId !== pid) return;
+        populateAudioTracks();
+      });
+      hlsInstance.on(Hls.Events.SUBTITLE_TRACK_SWITCH, function () {
+        if (currentPlaybackId !== pid) return;
+        populateSubtitleTracks();
       });
     } else {
       customActive = false;
@@ -1019,6 +1223,10 @@
       if (!raw) return null;
       var entry = JSON.parse(raw);
       if (!entry || !entry.url || !entry.t) return null;
+      if (entry.direct) { // legacy requestdl CDN cache entries are dead
+        localStorage.removeItem(streamCacheKey(type, id, season, episode));
+        return null;
+      }
       if (Date.now() - entry.t > STREAM_CACHE_TTL) {
         localStorage.removeItem(streamCacheKey(type, id, season, episode));
         return null;
@@ -1027,12 +1235,11 @@
     } catch (e) { return null; }
   }
 
-  function streamCacheSet(type, id, season, episode, url, source, direct) {
+  function streamCacheSet(type, id, season, episode, url, source) {
     try {
       localStorage.setItem(streamCacheKey(type, id, season, episode), JSON.stringify({
         url: url,
         source: source || 'TorBox',
-        direct: !!direct,
         t: Date.now()
       }));
     } catch (e) {}
@@ -1223,20 +1430,22 @@
   function clearSourceCache() {
     sourceCache.url = null;
     sourceCache.hlsUrl = null;
-    sourceCache.directUrl = null;
-    sourceCache.direct = false;
     sourceCache.ready = false;
     sourceCache.source = '';
     sourceCache.warm = false;
   }
 
-  function browserScrapeStreams(imdbId, type, season, episode) {
-    var path = type === 'tv'
-      ? 'https://torrentio.strem.fun/stream/series/' + imdbId + ':' + season + ':' + episode + '.json'
-      : 'https://torrentio.strem.fun/stream/movie/' + imdbId + '.json';
+  var TORRENTIO_INSTANCES = [
+    'https://torrentio.strem.fun',
+    'https://torrentio.flamestream.xyz',
+    'https://torrentio.strem.ovh',
+    'https://torrentio.gontjarow.cf'
+  ];
+
+  function scrapeInstance(base, path) {
     var controller = new AbortController();
     var timeout = setTimeout(function () { controller.abort(); }, 45000);
-    return fetch(path, { signal: controller.signal }).then(function (r) {
+    return fetch(base + path, { signal: controller.signal }).then(function (r) {
       clearTimeout(timeout);
       if (!r.ok) throw new Error('scraper status ' + r.status);
       return r.json();
@@ -1244,12 +1453,13 @@
       var out = [];
       var seen = {};
       (data.streams || []).forEach(function (s) {
-        var h = String(s.infoHash || '').trim().toLowerCase();
+        var h = String(s.infoHash || s.hash || '').trim().toLowerCase();
         if (!/^[0-9a-f]{40}$/.test(h)) return;
         if (seen[h]) return;
         seen[h] = true;
         out.push({ hash: h, title: s.title || '' });
       });
+      if (!out.length) throw new Error('no streams');
       return out;
     }).catch(function (err) {
       clearTimeout(timeout);
@@ -1257,16 +1467,34 @@
     });
   }
 
+  function browserScrapeStreams(imdbId, type, season, episode) {
+    var path = type === 'tv'
+      ? '/stream/series/' + imdbId + ':' + season + ':' + episode + '.json'
+      : '/stream/movie/' + imdbId + '.json';
+    var chain = Promise.reject(new Error('start'));
+    TORRENTIO_INSTANCES.forEach(function (base) {
+      chain = chain.catch(function () { return scrapeInstance(base, path); });
+    });
+    return chain;
+  }
+
+  function sourceApiUrl(item, type, sNum, eNum, extra) {
+    var u = '/api/torbox-source?tmdbId=' + item.id + '&type=' + type;
+    if (type === 'tv') u += '&season=' + (sNum || 1) + '&episode=' + (eNum || 1);
+    var t = item.title || item.name || '';
+    if (t) u += '&title=' + encodeURIComponent(String(t).slice(0, 150));
+    if (extra) u += extra;
+    return u;
+  }
+
   function resolveHybridStream(item, type, sNum, eNum) {
     return new Promise(function (resolve, reject) {
-      var url = '/api/torbox-source?tmdbId=' + item.id + '&type=' + type;
-      if (type === 'tv') url += '&season=' + sNum + '&episode=' + eNum;
-      if (forceRefresh) url += '&refresh=1';
+      var url = sourceApiUrl(item, type, sNum, eNum, forceRefresh ? '&refresh=1' : '');
 
       function scrapeAndDownload(imdbId) {
         showLoader(true, 'Searching torrent sources (first lookup can take up to ~45s)...');
-        browserScrapeStreams(imdbId, type, sNum, eNum).then(function (streams) {
-          if (!streams || !streams.length) throw new Error('no torrents found');
+        var title = item.title || item.name || '';
+        browserScrapeStreams(imdbId, type, sNum, eNum).catch(function () { return []; }).then(function (streams) {
           return fetch('/api/torbox-source', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1276,7 +1504,8 @@
               season: sNum,
               episode: eNum,
               imdbId: imdbId,
-              streams: streams,
+              title: title,
+              streams: streams || [],
               download: true
             })
           }).then(function (r) {
@@ -1289,7 +1518,7 @@
           if (data && data.downloading && data.torrentId) {
             return pollTorrentStream(item, type, sNum, eNum, data.torrentId, data.torrentHash, data.torrentTitle);
           }
-          if (!data || (!data.hlsUrl && !data.directUrl)) throw new Error('No cached torrent');
+          if (!data || !data.hlsUrl) throw new Error('No cached torrent');
           return data;
         }).then(function (data) {
           resolve(data);
@@ -1308,7 +1537,7 @@
           return data;
         });
       }).then(function (data) {
-        if (!data.hlsUrl && !data.directUrl) throw new Error('No stream URL');
+        if (!data.hlsUrl) throw new Error('No stream URL');
         resolve(data);
       }).catch(function (err) {
         var imdbId = err && err.imdbId;
@@ -1320,9 +1549,7 @@
 
   function pollTorrentStream(item, type, sNum, eNum, torrentId, torrentHash, torrentTitle) {
     return new Promise(function (resolve, reject) {
-      var url = '/api/torbox-source?tmdbId=' + item.id + '&type=' + type;
-      if (type === 'tv') url += '&season=' + sNum + '&episode=' + eNum;
-      url += '&action=progress&torrentId=' + encodeURIComponent(torrentId);
+      var url = sourceApiUrl(item, type, sNum, eNum) + '&action=progress&torrentId=' + encodeURIComponent(torrentId);
       if (torrentHash) url += '&hash=' + encodeURIComponent(torrentHash);
       if (torrentTitle) url += '&title=' + encodeURIComponent(String(torrentTitle).slice(0, 150));
 
@@ -1347,7 +1574,7 @@
             return data;
           });
         }).then(function (data) {
-          if (data && (data.hlsUrl || data.directUrl)) { resolve(data); return; }
+          if (data && data.hlsUrl) { resolve(data); return; }
           if (data && typeof data.progress === 'number') lastPct = Math.round(data.progress);
           showLoader(true, 'Preparing stream (downloading to server)... ' + lastPct + '%');
           setTimeout(tick, POLL_INTERVAL);
@@ -1369,16 +1596,13 @@
     if (!item || !item.id) return Promise.reject(new Error('no item'));
     var sNum = season || 1;
     var eNum = episode || 1;
-    var url = '/api/torbox-source?tmdbId=' + item.id + '&type=' + type;
-    if (type === 'tv') url += '&season=' + sNum + '&episode=' + eNum;
+    var url = sourceApiUrl(item, type, sNum, eNum);
 
     if (prefetchPromises[url]) return prefetchPromises[url];
 
     var cached = streamCacheGet(type, item.id, sNum, eNum);
     if (cached) {
-      sourceCache.hlsUrl = cached.direct ? null : cached.url;
-      sourceCache.directUrl = cached.direct ? cached.url : null;
-      sourceCache.direct = !!cached.direct;
+      sourceCache.hlsUrl = cached.url;
       sourceCache.source = cached.source || 'TorBox';
       sourceCache.url = url;
       sourceCache.ready = true;
@@ -1393,15 +1617,13 @@
       if (!r.ok) throw new Error('status ' + r.status);
       return r.json();
     }).then(function (data) {
-      if (!data.hlsUrl && !data.directUrl) throw new Error('No stream URL');
+      if (!data.hlsUrl) throw new Error('No stream URL');
       sourceCache.hlsUrl = data.hlsUrl || null;
-      sourceCache.directUrl = data.directUrl || null;
-      sourceCache.direct = !!data.directUrl;
       sourceCache.source = data.source || 'TorBox';
       sourceCache.url = url;
       sourceCache.ready = true;
       sourceCache.warm = true;
-      streamCacheSet(type, item.id, sNum, eNum, data.hlsUrl || data.directUrl, data.source || 'TorBox', !!data.directUrl);
+      streamCacheSet(type, item.id, sNum, eNum, data.hlsUrl, data.source || 'TorBox');
     }).finally(function () {
       clearTimeout(timeout);
       delete prefetchInFlight[url];
@@ -1413,6 +1635,7 @@
 
   function scheduleHoverPrefetch(item, mediaType, cardEl) {
     if (!item || !item.id || !cardEl) return;
+    if (isTitleBlocked(mediaType, item.id) || isUnreleased(item)) return;
     if (cardEl._hoverTimer) {
       clearTimeout(cardEl._hoverTimer);
       cardEl._hoverTimer = null;
@@ -1448,23 +1671,19 @@
       var eNum = episodeSelect ? episodeSelect.value || 1 : 1;
       currentMedia.s = sNum;
       currentMedia.e = eNum;
-      var url = '/api/torbox-source?tmdbId=' + item.id + '&type=' + type;
-      if (type === 'tv') url += '&season=' + sNum + '&episode=' + eNum;
-      if (forceRefresh) url += '&refresh=1';
+      var url = sourceApiUrl(item, type, sNum, eNum, forceRefresh ? '&refresh=1' : '');
 
       function runHybrid() {
         showLoader(true, 'Loading stream...');
         resolveHybridStream(item, type, sNum, eNum).then(function (data) {
           forceRefresh = false;
           sourceCache.hlsUrl = data.hlsUrl || null;
-          sourceCache.directUrl = data.directUrl || null;
-          sourceCache.direct = !!data.directUrl;
           sourceCache.source = data.source || 'TorBox';
           sourceCache.url = url;
           sourceCache.ready = true;
           sourceCache.warm = false;
-          streamCacheSet(type, item.id, sNum, eNum, data.hlsUrl || data.directUrl, data.source || 'TorBox', !!data.directUrl);
-          initCustomPlayer(data.hlsUrl || data.directUrl, data.source || 'TorBox', !!data.directUrl);
+          streamCacheSet(type, item.id, sNum, eNum, data.hlsUrl, data.source || 'TorBox');
+          initCustomPlayer(data.hlsUrl, data.source || 'TorBox');
           resolve();
         }).catch(function (err) {
           forceRefresh = false;
@@ -1477,8 +1696,8 @@
         showLoader(true, 'Loading stream...');
         pf.then(function () {
           sourceCache.warm = true;
-          if (sourceCache.ready && (sourceCache.hlsUrl || sourceCache.directUrl) && sourceCache.url === url) {
-            initCustomPlayer(sourceCache.hlsUrl || sourceCache.directUrl, sourceCache.source, sourceCache.direct);
+          if (sourceCache.ready && sourceCache.hlsUrl && sourceCache.url === url) {
+            initCustomPlayer(sourceCache.hlsUrl, sourceCache.source);
             resolve();
           } else {
             runHybrid();
@@ -1489,21 +1708,19 @@
         return;
       }
 
-      if (!forceRefresh && sourceCache.url === url && sourceCache.ready && (sourceCache.hlsUrl || sourceCache.directUrl)) {
-        initCustomPlayer(sourceCache.hlsUrl || sourceCache.directUrl, sourceCache.source, sourceCache.direct);
+      if (!forceRefresh && sourceCache.url === url && sourceCache.ready && sourceCache.hlsUrl) {
+        initCustomPlayer(sourceCache.hlsUrl, sourceCache.source);
         resolve(); return;
       }
 
       var cached = !forceRefresh ? streamCacheGet(type, item.id, sNum, eNum) : null;
       if (cached && cached.url) {
-        sourceCache.hlsUrl = cached.direct ? null : cached.url;
-        sourceCache.directUrl = cached.direct ? cached.url : null;
-        sourceCache.direct = !!cached.direct;
+        sourceCache.hlsUrl = cached.url;
         sourceCache.source = cached.source || 'TorBox';
         sourceCache.url = url;
         sourceCache.ready = true;
         sourceCache.warm = true;
-        initCustomPlayer(cached.url, cached.source || 'TorBox', !!cached.direct);
+        initCustomPlayer(cached.url, cached.source || 'TorBox');
         resolve(); return;
       }
 
@@ -1515,7 +1732,17 @@
     initServerSelector();
     currentMedia = { item: item, type: mediaType };
     currentPlaybackId = newPlaybackId();
+    hlsFatalRetryPid = null; // one retry allowed per user-initiated playback
     playerTitle.textContent = item.title || item.name || '';
+    if (isTitleBlocked(mediaType, item.id) || isUnreleased(item)) {
+      playerModal.classList.add('active');
+      document.body.style.overflow = 'hidden';
+      showLoader(false);
+      showPlayerError(isTitleBlocked(mediaType, item.id)
+        ? 'This title is currently unavailable.'
+        : 'Available on a future date upon official release');
+      return;
+    }
     playerIframe.setAttribute('allow', 'autoplay; encrypted-media; fullscreen; picture-in-picture');
     playerIframe.style.cssText = 'width:100%; height:100%; border:0; display:block;';
 
@@ -1532,14 +1759,12 @@
       var eNum = 1;
       var warm = streamCacheGet(mediaType, item.id, sNum, eNum);
       if (warm && warm.url) {
-        sourceCache.hlsUrl = warm.direct ? null : warm.url;
-        sourceCache.directUrl = warm.direct ? warm.url : null;
-        sourceCache.direct = !!warm.direct;
+        sourceCache.hlsUrl = warm.url;
         sourceCache.source = warm.source || 'TorBox';
-        sourceCache.url = '/api/torbox-source?tmdbId=' + item.id + '&type=movie';
+        sourceCache.url = sourceApiUrl(item, mediaType, 1, 1);
         sourceCache.ready = true;
         sourceCache.warm = true;
-        initCustomPlayer(warm.url, warm.source || 'TorBox', !!warm.direct);
+        initCustomPlayer(warm.url, warm.source || 'TorBox');
       } else {
         showLoader(true, 'Loading stream...');
         attemptCustomPlayer().catch(function (err) {
@@ -1658,7 +1883,10 @@
 
     var grid = document.createElement('div');
     grid.className = 'search-results-grid';
-    items.forEach(function (item) { grid.appendChild(createCard(item, item.media_type)); });
+    items.forEach(function (item) {
+      var c = createCard(item, item.media_type);
+      if (c) grid.appendChild(c);
+    });
     section.appendChild(grid);
     content.appendChild(section);
   }
@@ -1750,6 +1978,10 @@
             if (hlsInstance.levels[ai].attrs && /avc/i.test(hlsInstance.levels[ai].attrs.CODECS || '')) { avcIdx = ai; break; }
           }
           if (avcIdx >= 0) hlsInstance.currentLevel = avcIdx;
+        } else if (setting === 'audio') {
+          if (hlsInstance) hlsInstance.audioTrack = parseInt(value, 10);
+        } else if (setting === 'subs') {
+          if (hlsInstance) hlsInstance.subtitleTrack = parseInt(value, 10);
         }
       });
     }
