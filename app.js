@@ -228,6 +228,7 @@
   var lastProgressSave = 0;
   var PLAYBACK_SAVE_INTERVAL = 5000;
   var currentPlaybackId = null;
+  var currentStreamRequestId = 0;
   var playbackCounter = 0;
   var resumeTarget = null;
 
@@ -1016,15 +1017,16 @@
     var activeVideo = document.getElementById('hls-video');
     if (activeVideo) {
       try { activeVideo.pause(); } catch (e) {}
+      try { activeVideo.removeAttribute('src'); activeVideo.load(); } catch (e) {}
       activeVideo.currentTime = 0;
     }
-    if (hlsInstance) { try { hlsInstance.destroy(); } catch (e) {} hlsInstance = null; }
+    if (hlsInstance) { try { hlsInstance.stopLoad(); hlsInstance.destroy(); } catch (e) {} hlsInstance = null; }
     if (plyrInstance) { try { plyrInstance.destroy(); } catch (e) {} plyrInstance = null; }
     detachPlaybackEvents();
     var video = document.getElementById('hls-video');
     var iframe = document.getElementById('player-iframe');
     var label = document.getElementById('source-label');
-    if (video) { video.style.display = 'none'; video.removeAttribute('src'); video.controls = false; }
+    if (video) { video.style.display = 'none'; video.controls = false; }
     if (iframe) { iframe.style.display = 'block'; }
     if (label) { label.style.display = 'none'; }
   }
@@ -1538,6 +1540,7 @@
   }
 
   function attemptCustomPlayer() {
+    var requestId = ++currentStreamRequestId;
     return new Promise(function (resolve, reject) {
       if (!currentMedia) { reject(); return; }
       var item = currentMedia.item;
@@ -1551,8 +1554,10 @@
       if (forceRefresh) url += '&refresh=1';
 
       function runHybrid() {
+        if (requestId !== currentStreamRequestId) return;
         showLoader(true, 'Loading stream...');
         resolveHybridStream(item, type, sNum, eNum).then(function (data) {
+          if (requestId !== currentStreamRequestId) return;
           forceRefresh = false;
           sourceCache.hlsUrl = data.hlsUrl || null;
           sourceCache.directUrl = data.directUrl || null;
@@ -1565,6 +1570,7 @@
           initCustomPlayer(data.hlsUrl || data.directUrl, data.source || 'TorBox', !!data.directUrl);
           resolve();
         }).catch(function (err) {
+          if (requestId !== currentStreamRequestId) return;
           forceRefresh = false;
           reject(err);
         });
@@ -1572,8 +1578,10 @@
 
       var pf = prefetchPromises[url];
       if (pf) {
+        if (requestId !== currentStreamRequestId) return;
         showLoader(true, 'Loading stream...');
         pf.then(function () {
+          if (requestId !== currentStreamRequestId) return;
           sourceCache.warm = true;
           if (sourceCache.ready && (sourceCache.hlsUrl || sourceCache.directUrl) && sourceCache.url === url) {
             initCustomPlayer(sourceCache.hlsUrl || sourceCache.directUrl, sourceCache.source, sourceCache.direct);
@@ -1588,12 +1596,14 @@
       }
 
       if (!forceRefresh && sourceCache.url === url && sourceCache.ready && (sourceCache.hlsUrl || sourceCache.directUrl)) {
+        if (requestId !== currentStreamRequestId) return;
         initCustomPlayer(sourceCache.hlsUrl || sourceCache.directUrl, sourceCache.source, sourceCache.direct);
         resolve(); return;
       }
 
       var cached = !forceRefresh ? streamCacheGet(type, item.id, sNum, eNum) : null;
       if (cached && cached.url) {
+        if (requestId !== currentStreamRequestId) return;
         sourceCache.hlsUrl = cached.direct ? null : cached.url;
         sourceCache.directUrl = cached.direct ? cached.url : null;
         sourceCache.direct = !!cached.direct;
@@ -1617,7 +1627,10 @@
     initServerSelector();
     currentMedia = { item: item, type: mediaType };
     currentPlaybackId = newPlaybackId();
+    currentStreamRequestId = currentPlaybackId;
     playerTitle.textContent = item.title || item.name || '';
+    var subtitleEl = document.getElementById('player-subtitle');
+    if (subtitleEl) subtitleEl.textContent = mediaType === 'tv' ? 'Season 1 · Episode 1' : '';
     playerIframe.setAttribute('allow', 'autoplay; encrypted-media; fullscreen; picture-in-picture');
     playerIframe.style.cssText = 'width:100%; height:100%; border:0; display:block;';
 
@@ -1664,6 +1677,7 @@
 
   function closePlayer() {
     currentPlaybackId = null;
+    currentStreamRequestId++;
     destroyCustomPlayer();
     saveProgress(true);
     renderContinueWatching();
@@ -1713,7 +1727,12 @@
         episodeSelect.value = resumeTarget.e;
         resumeTarget = null;
       }
+      var subtitleEl = document.getElementById('player-subtitle');
+      if (subtitleEl) {
+        subtitleEl.textContent = 'Season ' + seasonNum + ' · Episode ' + (episodeSelect.value || 1);
+      }
       currentPlaybackId = newPlaybackId();
+      currentStreamRequestId = currentPlaybackId;
       attemptCustomPlayer().catch(function (err) {
         handleCustomPlayerFailure(err);
       });
@@ -1800,9 +1819,12 @@
     episodeSelect.addEventListener('change', function () {
       if (currentMedia) {
         currentPlaybackId = newPlaybackId();
+        currentStreamRequestId = currentPlaybackId;
         destroyCustomPlayer();
         showLoader(true, 'Loading stream...');
         playerIframe.src = 'about:blank';
+        var subtitleEl = document.getElementById('player-subtitle');
+        if (subtitleEl) subtitleEl.textContent = 'Season ' + (seasonSelect.value || 1) + ' · Episode ' + (this.value || 1);
         attemptCustomPlayer().catch(function (err) {
           handleCustomPlayerFailure(err);
         });
