@@ -514,6 +514,30 @@ function pickVideoFile(files, type, season, episode, cand) {
   return fileId;
 }
 
+function pickVideoFileCandidates(files, type, season, episode, cand) {
+  var videoFiles = files.filter(function (f) {
+    var name = (f.name || f.short_name || '').toLowerCase();
+    var isVidMime = f.mimetype && f.mimetype.indexOf('video/') === 0;
+    var isVidExt = /\.(mp4|mkv|avi|mov|webm|ts|m3u8)$/i.test(name);
+    return isVidMime || isVidExt;
+  });
+  if (videoFiles.length === 0) videoFiles = files;
+
+  return videoFiles.map(function (f, idx) {
+    var name = f.name || f.short_name || '';
+    return {
+      file: f,
+      idx: idx,
+      score: scoreVideoFileName(name, cand && cand.title, type, season, episode)
+    };
+  }).sort(function (a, b) {
+    if (b.score !== a.score) return b.score - a.score;
+    return a.idx - b.idx;
+  }).map(function (entry) {
+    return entry.file;
+  });
+}
+
 function buildSourceMeta(cand) {
   var bestQ = parseQuality(cand && cand.title);
   var qualityName = 'HD';
@@ -527,26 +551,48 @@ function buildSourceMeta(cand) {
 }
 
 async function createStreamForTorrent(torrentId, files, type, season, episode, cand) {
-  var fileId = pickVideoFile(files || [], type, season, episode, cand);
-  var path = '/stream/createstream?id=' + torrentId + '&file_id=' + fileId + '&type=torrent';
-  var res = await torboxRequest(path, 'GET', null, 8000);
-  if (!res) return { error: 'TorBox is unreachable. Try again.', torboxError: 'request_failed' };
-  var json = res.json;
-  if (!res.ok || !json || !json.success || !json.data) {
-    return { error: friendlyTorBoxError(json), torboxError: torboxErrorCode(json) };
-  }
-  var hlsUrl = extractHlsUrl(json);
-  if (!hlsUrl) return { error: 'TorBox returned no HLS manifest URL.', torboxError: 'no_hls' };
-  return {
-    hlsUrl: hlsUrl,
-    source: buildSourceMeta(cand),
-    debug: {
-      hash: cand ? cand.cleanHash : null,
-      torrentId: torrentId,
-      fileId: fileId,
-      codec: parseCodec(cand && cand.title)
+  var candidateFiles = pickVideoFileCandidates(files || [], type, season, episode, cand);
+  if (!candidateFiles.length) candidateFiles = [{ id: 0 }];
+
+  var lastError = null;
+  for (var i = 0; i < candidateFiles.length; i++) {
+    var currentFile = candidateFiles[i];
+    var fileId = currentFile && currentFile.id !== undefined ? currentFile.id : 0;
+    var path = '/stream/createstream?id=' + torrentId + '&file_id=' + fileId + '&type=torrent';
+    var res = await torboxRequest(path, 'GET', null, 8000);
+    if (!res) {
+      lastError = { error: 'TorBox is unreachable. Try again.', torboxError: 'request_failed' };
+      continue;
     }
-  };
+
+    var json = res.json;
+    var torboxCode = torboxErrorCode(json);
+    if (!res.ok || !json || !json.success || !json.data) {
+      lastError = { error: friendlyTorBoxError(json), torboxError: torboxCode || 'stream_failed' };
+      if (torboxCode === 'BOZO_FILE' || torboxCode === 'bozo_file') continue;
+      if (String(lastError.error || '').toLowerCase().indexOf('bad file') !== -1) continue;
+      continue;
+    }
+
+    var hlsUrl = extractHlsUrl(json);
+    if (!hlsUrl) {
+      lastError = { error: 'TorBox returned no HLS manifest URL.', torboxError: 'no_hls' };
+      continue;
+    }
+
+    return {
+      hlsUrl: hlsUrl,
+      source: buildSourceMeta(cand),
+      debug: {
+        hash: cand ? cand.cleanHash : null,
+        torrentId: torrentId,
+        fileId: fileId,
+        codec: parseCodec(cand && cand.title)
+      }
+    };
+  }
+
+  return lastError || { error: 'TorBox could not create a native HLS stream for this title.', torboxError: 'stream_failed' };
 }
 
 function isBrowserPlayableFile(files, fileId, cand) {
