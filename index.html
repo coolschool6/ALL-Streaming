@@ -89,6 +89,31 @@
     </div>
   </main>
 
+  <!-- MOBILE BOTTOM NAV -->
+  <div class="mobile-nav" id="mobile-nav" aria-label="Mobile navigation">
+    <button class="mobile-nav-btn active" id="mobile-nav-home" data-action="home" aria-label="Home">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      <span>Home</span>
+    </button>
+    <button class="mobile-nav-btn" id="mobile-nav-search" data-action="search" aria-label="Search">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <span>Search</span>
+    </button>
+    <button class="mobile-nav-btn" id="mobile-nav-library" data-action="library" aria-label="Library">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+      <span>Library</span>
+    </button>
+  </div>
+
+  <!-- FULL-SCREEN SEARCH OVERLAY -->
+  <div class="search-overlay hidden" id="search-overlay">
+    <div class="search-overlay-header">
+      <input type="text" id="search-overlay-input" placeholder="Search movies & TV shows..." autocomplete="off" spellcheck="false">
+      <button class="search-overlay-close" id="search-overlay-close" aria-label="Close search">&times;</button>
+    </div>
+    <div class="search-overlay-results" id="search-overlay-results"></div>
+  </div>
+
   <div class="player-modal" id="player-modal">
     <div class="player-header">
       <button class="player-close" id="player-close" aria-label="Close player">&times;</button>
@@ -106,22 +131,27 @@
     </div>
     <div class="player-wrap">
       <div id="player-shield" class="player-shield" onclick="this.style.display='none'" title="Tap to interact with player"></div>
-      <div id="source-label" class="source-label" style="display:none"></div>
       <iframe id="player-iframe" allow="autoplay; encrypted-media; fullscreen; picture-in-picture; clipboard-write" referrerpolicy="no-referrer-when-downgrade"></iframe>
       <div class="player-loader hidden" id="player-loader">
         <div class="spinner"></div>
+        <div class="loader-track"><div class="loader-fill" id="loader-fill"></div></div>
         <div class="loader-status" id="loader-status">Loading stream...</div>
+        <div class="loader-count" id="loader-count"></div>
       </div>
       <video id="hls-video" class="hls-video" crossorigin playsinline webkit-playsinline style="display:none; width:100%; height:100%;"></video>
       <div id="player-overlay"></div>
-    </div>
-    <div class="player-controls" id="player-controls" aria-hidden="true">
-      <button class="player-btn" id="player-skip-back" title="Skip back 10s">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>
-      </button>
-      <button class="player-btn" id="player-skip-forward" title="Skip forward 10s">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z"/></svg>
-      </button>
+      <div class="player-quickbar" id="player-quickbar">
+        <button class="player-btn" id="player-skip-back" title="Skip back 10s">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>
+        </button>
+        <button class="player-btn player-next" id="player-next" title="Play next episode" style="display:none;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+          <span class="player-next-label">Next</span>
+        </button>
+        <button class="player-btn" id="player-skip-forward" title="Skip forward 10s">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z"/></svg>
+        </button>
+      </div>
     </div>
   </div>
 
@@ -158,6 +188,7 @@
       <h1 class="show-title" id="show-title"></h1>
       <div class="show-meta" id="show-meta"></div>
     </div>
+    <div class="show-availability hidden" id="show-availability"></div>
     <div class="show-toolbar">
       <div class="season-selector" id="season-selector">
         <button class="season-btn" id="season-btn">Season 1 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>

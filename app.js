@@ -50,6 +50,7 @@
       clearExpiryTimer();
       localStorage.removeItem('asfr_access_key');
       localStorage.removeItem('asfr_expiry_time');
+      stopVideoPlayback();
       overlay.style.display = 'flex';
       if (badge) badge.style.display = 'none';
     }
@@ -211,12 +212,17 @@
   var searchClose = document.getElementById('search-close') || document.getElementById('searchClose');
   var navBtns = document.querySelectorAll('.nav-btn');
 
-  var serverSelect = null;
+  var BLOCKED_TMDB_IDS = { 634649: true };
+  function isBlockedItem(item) {
+    return !!item && !!BLOCKED_TMDB_IDS[item.id];
+  }
+
   var heroItems = [];
   var heroIndex = 0;
   var heroInterval = null;
   var currentFilter = 'all';
   var searchTimeout = null;
+  var searchOverlayTimeout = null;
   var currentMedia = null;
   var hlsInstance = null;
   var plyrInstance = null;
@@ -231,16 +237,14 @@
   var currentStreamRequestId = 0;
   var playbackCounter = 0;
   var resumeTarget = null;
+  var hlsFatalRetries = 0;
+  var prewarmInFlight = false;
+  var nextPrefetchedFor = null;
+  var loaderStart = 0;
 
   function newPlaybackId() {
     playbackCounter++;
     return playbackCounter;
-  }
-
-  function initServerSelector() {
-    var existing = document.getElementById('server-select');
-    if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
-    serverSelect = null;
   }
 
   function fetchTMDB(endpoint) {
@@ -283,19 +287,19 @@
     return isFutureRelease(item) ? 'Available on a future date upon official release' : '';
   }
 
-  function addAvailabilityBadge(card, item) {
+  function addAvailabilityBadge(card, item, posterEl) {
     var existing = card.querySelector('.card-availability');
     if (existing) existing.remove();
     if (!isFutureRelease(item)) return;
     var badge = document.createElement('div');
     badge.className = 'card-availability';
-    badge.textContent = 'Future release';
-    var poster = card.querySelector('.card-poster');
+    badge.textContent = 'Coming Soon';
+    var poster = posterEl || card.querySelector('.card-poster');
     if (poster) poster.appendChild(badge);
   }
 
   function initHero(items) {
-    heroItems = items.slice(0, 8);
+    heroItems = items.filter(function (it) { return !isBlockedItem(it); }).slice(0, 8);
     heroIndex = 0;
     renderHeroItem();
     renderHeroDots();
@@ -441,7 +445,10 @@
         grid.innerHTML = '<div class="search-empty">No titles found for this provider.</div>';
         return;
       }
-      combined.forEach(function (item) { grid.appendChild(createCard(item, item.media_type)); });
+      for (var ci = 0; ci < combined.length; ci++) {
+        var cCard = createCard(combined[ci], combined[ci].media_type);
+        if (cCard) grid.appendChild(cCard);
+      }
     });
     window.scrollTo({ top: 300, behavior: 'smooth' });
   }
@@ -467,9 +474,11 @@
       var item = displayItems[i];
       var mediaType = item.media_type || type || 'movie';
       if (useTopStyle) {
-        track.appendChild(createTopCard(item, mediaType, i + 1));
+        var topCard = createTopCard(item, mediaType, i + 1);
+        if (topCard) track.appendChild(topCard);
       } else {
-        track.appendChild(createCard(item, mediaType));
+        var regCard = createCard(item, mediaType);
+        if (regCard) track.appendChild(regCard);
       }
     }
     section.appendChild(track);
@@ -490,7 +499,25 @@
       entries.push({ type: parts[0], id: parts[1], s: parts[2], e: parts[3], entry: entry });
     });
     entries.sort(function (a, b) { return (b.entry.t || 0) - (a.entry.t || 0); });
-    if (!entries.length) return;
+
+    var groups = [];
+    var groupMap = {};
+    entries.forEach(function (item) {
+      var gKey = item.type + ':' + item.id;
+      if (!groupMap[gKey]) {
+        groupMap[gKey] = { type: item.type, id: item.id, latest: item, s: item.s, e: item.e };
+        groups.push(groupMap[gKey]);
+      } else {
+        var g = groupMap[gKey];
+        if ((item.entry.t || 0) > (g.latest.entry.t || 0)) {
+          g.latest = item;
+          g.s = item.s;
+          g.e = item.e;
+        }
+      }
+    });
+    groups.sort(function (a, b) { return (b.latest.entry.t || 0) - (a.latest.entry.t || 0); });
+    if (!groups.length) return;
 
     var section = document.createElement('div');
     section.className = 'category-row';
@@ -506,7 +533,7 @@
 
     var track = document.createElement('div');
     track.className = 'cards-track';
-    entries.slice(0, 12).forEach(function (cw) {
+    groups.slice(0, 12).forEach(function (cw) {
       var card = document.createElement('div');
       card.className = 'card continue-card';
       card.setAttribute('data-type', cw.type);
@@ -515,10 +542,10 @@
       poster.className = 'card-poster';
       var img = document.createElement('img');
       img.loading = 'lazy';
-      img.src = cw.entry.poster ? imgURL(cw.entry.poster, 'w342') : '';
-      img.alt = cw.entry.title;
+      img.src = cw.latest.entry.poster ? imgURL(cw.latest.entry.poster, 'w342') : '';
+      img.alt = cw.latest.entry.title;
       poster.appendChild(img);
-      var pct = (cw.entry.dur > 0) ? Math.min(100, Math.round((cw.entry.pos / cw.entry.dur) * 100)) : 0;
+      var pct = (cw.latest.entry.dur > 0) ? Math.min(100, Math.round((cw.latest.entry.pos / cw.latest.entry.dur) * 100)) : 0;
       var bar = document.createElement('div');
       bar.className = 'continue-progress';
       var fill = document.createElement('div');
@@ -535,25 +562,26 @@
       info.className = 'card-info';
       var name = document.createElement('div');
       name.className = 'card-name';
-      name.textContent = cw.entry.title;
+      name.textContent = cw.latest.entry.title;
       info.appendChild(name);
       var sub = document.createElement('div');
       sub.className = 'card-year';
-      sub.textContent = cw.type === 'tv' ? 'S' + cw.s + ' \u00b7 E' + cw.e : fmtTime(Math.max(0, cw.entry.dur - cw.entry.pos)) + ' left';
+      sub.textContent = cw.type === 'tv' ? 'S' + cw.s + ' \u00b7 E' + cw.e : fmtTime(Math.max(0, cw.latest.entry.dur - cw.latest.entry.pos)) + ' left';
       info.appendChild(sub);
       card.appendChild(info);
       card.addEventListener('click', function () {
-        var item = { id: cw.id, title: cw.entry.title, poster_path: cw.entry.poster };
+        var item = { id: cw.id, title: cw.latest.entry.title, poster_path: cw.latest.entry.poster };
         resumeTarget = { type: cw.type, s: cw.s, e: cw.e };
         openPlayer(item, cw.type);
       });
-      track.appendChild(card);
+      if (!isBlockedItem(cw)) track.appendChild(card);
     });
     section.appendChild(track);
     content.insertBefore(section, content.firstChild);
   }
 
   function createCard(item, mediaType) {
+    if (isBlockedItem(item)) return null;
     var card = document.createElement('div');
     card.className = 'card';
     card.setAttribute('data-type', mediaType);
@@ -574,7 +602,7 @@
       poster.appendChild(ratingBadge);
     }
 
-    addAvailabilityBadge(card, item);
+    addAvailabilityBadge(card, item, poster);
     card.appendChild(poster);
 
     var info = document.createElement('div');
@@ -607,6 +635,7 @@
   }
 
   function createTopCard(item, mediaType, rank) {
+    if (isBlockedItem(item)) return null;
     var card = document.createElement('div');
     card.className = 'top-card';
     card.setAttribute('data-type', mediaType);
@@ -622,7 +651,7 @@
     var src = item.poster_path || item.backdrop_path;
     img.src = src ? imgURL(src) : '';
     posterWrap.appendChild(img);
-    addAvailabilityBadge(card, item);
+    addAvailabilityBadge(card, item, posterWrap);
     card.appendChild(posterWrap);
     card.addEventListener('click', function () { openDetail(item, mediaType); });
     card.addEventListener('mouseenter', function () {
@@ -638,6 +667,7 @@
   }
 
   function openDetail(item, mediaType) {
+    if (isBlockedItem(item)) return;
     if (mediaType === 'tv') {
       openShowPage(item);
       return;
@@ -649,7 +679,7 @@
     detailOverview.textContent = item.overview || '';
     var blocked = isFutureRelease(item);
     detailWatch.disabled = blocked;
-    detailWatch.textContent = blocked ? 'Unavailable' : 'Watch now';
+    detailWatch.textContent = blocked ? 'Coming Soon' : 'Watch now';
     detailWatch.onclick = function () {
       if (blocked) return;
       closeDetail();
@@ -658,9 +688,11 @@
     detailModal.classList.add('active');
     document.body.style.overflow = 'hidden';
     if (mediaType !== 'tv') {
-      detailWatch.textContent = 'Watch now';
-      var prog = progressGet('movie', item.id, 1, 1);
-      if (prog && prog.pos > 15) detailWatch.textContent = 'Resume \u00b7 ' + fmtTime(prog.pos);
+      if (!blocked) {
+        detailWatch.textContent = 'Watch now';
+        var prog = progressGet('movie', item.id, 1, 1);
+        if (prog && prog.pos > 15) detailWatch.textContent = 'Resume \u00b7 ' + fmtTime(prog.pos);
+      }
       preFetchSource(item, mediaType).catch(function () {});
     }
   }
@@ -695,6 +727,19 @@
 
     var bg = item.backdrop_path || item.poster_path;
     showBackdrop.style.backgroundImage = bg ? 'url(' + imgURL(bg, 'original') + ')' : 'none';
+
+    var availability = document.getElementById('show-availability');
+    if (availability) {
+      if (isFutureRelease(item)) {
+        availability.classList.remove('hidden');
+        var releaseDate = parseReleaseDate(item);
+        var dateText = releaseDate ? releaseDate.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }) : 'a future date';
+        availability.textContent = 'Coming Soon \u2014 available upon official release on ' + dateText;
+      } else {
+        availability.classList.add('hidden');
+        availability.textContent = '';
+      }
+    }
 
     fetchTMDB('/tv/' + item.id).then(function (tvData) {
       currentShowData = tvData;
@@ -904,22 +949,18 @@
     var pid = currentPlaybackId;
     var video = document.getElementById('hls-video');
     var iframe = document.getElementById('player-iframe');
-    var label = document.getElementById('source-label');
     if (!video || !iframe) return;
 
     destroyCustomPlayer();
 
+    updatePlayNextButton();
     customActive = true;
+    hlsFatalRetries = 0;
     setShield(false);
     iframe.style.display = 'none';
     video.style.display = 'block';
     video.controls = true;
     video.removeAttribute('src');
-    if (label) {
-      label.textContent = sourceName || '';
-      label.style.display = sourceName ? 'block' : 'none';
-      label.classList.toggle('warm', !!sourceCache.warm);
-    }
 
     attachPlaybackEvents();
     video.addEventListener('loadedmetadata', function () {
@@ -947,14 +988,19 @@
         if (currentPlaybackId !== pid) return;
         onPlaybackError();
       }, { once: true });
+      video.addEventListener('playing', function () {
+        if (currentPlaybackId !== pid) return;
+        showLoader(false);
+      });
     } else if (typeof Hls !== 'undefined' && Hls.isSupported()) {
       hlsInstance = new Hls({
         maxBufferLength: 30,
-        maxMaxBufferLength: 90,
+        maxMaxBufferLength: 60,
         maxBufferSize: 200 * 1000 * 1000,
-        maxBufferHole: 2,
+        maxBufferHole: 0.5,
         enableWorker: true,
-        lowLatencyMode: false,
+        lowLatencyMode: true,
+        startFragPrefetch: true,
         backBufferLength: 20,
         manifestLoadingMaxRetry: 2,
         levelLoadingMaxRetry: 2,
@@ -997,12 +1043,30 @@
         video.play().catch(function () {});
       });
       hlsInstance.on(Hls.Events.ERROR, function (e, data) {
-        if (data.fatal) {
-          if (currentPlaybackId !== pid) return;
-          try { hlsInstance.destroy(); } catch (err) {}
-          hlsInstance = null;
-          onPlaybackError();
+        if (!data || !data.fatal) return;
+        if (currentPlaybackId !== pid) return;
+        hlsFatalRetries++;
+        if (hlsFatalRetries <= 2) {
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+            showLoader(true, 'Connection hiccup. Reconnecting...');
+            try { hlsInstance.startLoad(); } catch (err) {}
+          } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+            showLoader(true, 'Video decode hiccup. Recovering...');
+            try { hlsInstance.recoverMediaError(); } catch (err) {}
+          } else {
+            try { hlsInstance.destroy(); } catch (err) {}
+            hlsInstance = null;
+            onPlaybackError();
+          }
+          return;
         }
+        try { hlsInstance.destroy(); } catch (err) {}
+        hlsInstance = null;
+        onPlaybackError();
+      });
+      video.addEventListener('playing', function () {
+        if (currentPlaybackId !== pid) return;
+        showLoader(false);
       });
     } else {
       customActive = false;
@@ -1012,23 +1076,35 @@
     }
   }
 
-  function destroyCustomPlayer() {
-    customActive = false;
+  function stopVideoPlayback() {
+    if (hlsInstance) {
+      try { hlsInstance.stopLoad(); hlsInstance.destroy(); } catch (e) {}
+      hlsInstance = null;
+    }
+    if (plyrInstance) {
+      try { plyrInstance.destroy(); } catch (e) {}
+      plyrInstance = null;
+    }
     var activeVideo = document.getElementById('hls-video');
     if (activeVideo) {
       try { activeVideo.pause(); } catch (e) {}
-      try { activeVideo.removeAttribute('src'); activeVideo.load(); } catch (e) {}
-      activeVideo.currentTime = 0;
+      try {
+        activeVideo.removeAttribute('src');
+        if (activeVideo.srcObject) activeVideo.srcObject = null;
+        activeVideo.load();
+        activeVideo.currentTime = 0;
+      } catch (e) {}
     }
-    if (hlsInstance) { try { hlsInstance.stopLoad(); hlsInstance.destroy(); } catch (e) {} hlsInstance = null; }
-    if (plyrInstance) { try { plyrInstance.destroy(); } catch (e) {} plyrInstance = null; }
+  }
+
+  function destroyCustomPlayer() {
+    customActive = false;
     detachPlaybackEvents();
+    stopVideoPlayback();
     var video = document.getElementById('hls-video');
     var iframe = document.getElementById('player-iframe');
-    var label = document.getElementById('source-label');
     if (video) { video.style.display = 'none'; video.controls = false; }
     if (iframe) { iframe.style.display = 'block'; }
-    if (label) { label.style.display = 'none'; }
   }
 
   function setShield(show) {
@@ -1036,24 +1112,66 @@
     if (el) el.style.display = show ? 'block' : 'none';
   }
 
-  function showLoader(show, status) {
+  function showLoader(show, status, progressOrSeconds) {
     var el = document.getElementById('player-loader');
     var statusEl = document.getElementById('loader-status');
+    var fillEl = document.getElementById('loader-fill');
+    var countEl = document.getElementById('loader-count');
     if (!el) return;
     el.classList.toggle('hidden', !show);
+    if (!show) {
+      loaderStart = 0;
+      if (fillEl) fillEl.style.width = '0%';
+      if (countEl) countEl.textContent = '';
+      return;
+    }
+    if (!loaderStart) loaderStart = Date.now();
+    var spinner = el.querySelector('.spinner');
+    var track = el.querySelector('.loader-track');
+    if (spinner) spinner.style.display = '';
+    if (track) track.style.display = '';
     if (status && statusEl) statusEl.textContent = status;
+    if (progressOrSeconds && typeof progressOrSeconds === 'number' && progressOrSeconds > 0) {
+      var pct = Math.max(0, Math.min(100, progressOrSeconds));
+      if (fillEl) {
+        fillEl.style.width = pct + '%';
+        fillEl.classList.add('determinate');
+      }
+      if (countEl) {
+        var elapsed = Math.max(1, (Date.now() - loaderStart) / 1000);
+        var estTotal = (elapsed * 100) / pct;
+        var remain = Math.max(1, Math.round(estTotal - elapsed));
+        countEl.textContent = 'Estimated ~' + remain + 's remaining';
+      }
+    } else {
+      if (fillEl) {
+        fillEl.style.width = '30%';
+        fillEl.classList.remove('determinate');
+      }
+      if (countEl) countEl.textContent = 'This may take up to 45 seconds';
+    }
   }
 
   function showPlayerError(msg) {
     showLoader(false);
+    stopVideoPlayback();
     var video = document.getElementById('hls-video');
-    var label = document.getElementById('source-label');
-    if (video) { video.style.display = 'none'; video.removeAttribute('src'); }
-    if (label) { label.textContent = msg; label.style.display = 'block'; label.style.background = 'rgba(255,0,0,0.3)'; label.style.padding = '10px'; }
+    if (video) video.style.display = 'none';
+    var el = document.getElementById('player-loader');
+    if (!el) return;
+    el.classList.remove('hidden');
+    var spinner = el.querySelector('.spinner');
+    var track = el.querySelector('.loader-track');
+    if (spinner) spinner.style.display = 'none';
+    if (track) track.style.display = 'none';
+    var statusEl = document.getElementById('loader-status');
+    if (statusEl) statusEl.textContent = msg || 'Stream could not be played.';
+    var countEl = document.getElementById('loader-count');
+    if (countEl) countEl.textContent = '';
   }
 
   var STREAM_CACHE_TTL = 24 * 60 * 60 * 1000;
-  var STREAM_CACHE_VERSION = 'v2';
+  var STREAM_CACHE_VERSION = 'v4';
   var STREAM_CACHE_VERSION_KEY = 'asfr_stream_cache_version';
 
   function clearLegacyStreamCache() {
@@ -1121,7 +1239,7 @@
     var msg = '';
     if (err && err.error) msg = err.error;
     else if (err && err.message) msg = err.message;
-    if (!msg) msg = 'Stream could not be played. Try again or pick a server.';
+    if (!msg) msg = 'Stream could not be played. Please try again.';
     showPlayerError(msg);
   }
 
@@ -1140,6 +1258,11 @@
     if (now - lastProgressSave < PLAYBACK_SAVE_INTERVAL) return;
     lastProgressSave = now;
     saveProgress(false);
+    var video = document.getElementById('hls-video');
+    if (!video) return;
+    if (currentMedia && currentMedia.type === 'tv' && isFinite(video.duration) && video.duration > 0 && video.currentTime >= video.duration * 0.8) {
+      prewarmNextEpisode();
+    }
   }
 
   function attachPlaybackEvents() {
@@ -1289,6 +1412,53 @@
     return false;
   }
 
+  function getNextEpisodeRef() {
+    if (!currentMedia || currentMedia.type !== 'tv' || !episodeSelect || !seasonSelect) return null;
+    var curEp = parseInt(episodeSelect.value, 10) || 0;
+    var options = Array.prototype.slice.call(episodeSelect.options);
+    var idx = -1;
+    for (var i = 0; i < options.length; i++) {
+      if (parseInt(options[i].value, 10) === curEp) { idx = i; break; }
+    }
+    if (idx >= 0 && idx < options.length - 1) {
+      return { s: parseInt(seasonSelect.value, 10) || 1, e: parseInt(options[idx + 1].value, 10) };
+    }
+    var seasons = Array.prototype.slice.call(seasonSelect.options).map(function (o) { return parseInt(o.value, 10); }).sort(function (a, b) { return a - b; });
+    var sIdx = seasons.indexOf(parseInt(seasonSelect.value, 10));
+    if (sIdx >= 0 && sIdx < seasons.length - 1) {
+      return { s: seasons[sIdx + 1], e: 1 };
+    }
+    return null;
+  }
+
+  function prewarmNextEpisode() {
+    if (!currentMedia || currentMedia.type !== 'tv') return;
+    if (prewarmInFlight) return;
+    if (!currentMedia.item) return;
+    var ref = getNextEpisodeRef();
+    if (!ref) return;
+    var pid = currentPlaybackId;
+    if (nextPrefetchedFor === pid) return;
+    if (streamCacheGet('tv', currentMedia.item.id, ref.s, ref.e)) { nextPrefetchedFor = pid; return; }
+    nextPrefetchedFor = pid;
+    prewarmInFlight = true;
+    resolveHybridStream(currentMedia.item, 'tv', ref.s, ref.e, 0, true).then(function (data) {
+      if (currentPlaybackId !== pid) return;
+      if (data && (data.hlsUrl || data.directUrl)) {
+        streamCacheSet('tv', currentMedia.item.id, ref.s, ref.e, data.hlsUrl || data.directUrl, data.source || 'TorBox', !!data.directUrl);
+      }
+    }).catch(function () {}).then(function () {
+      prewarmInFlight = false;
+    });
+  }
+
+  function updatePlayNextButton() {
+    var btn = document.getElementById('player-next');
+    if (!btn) return;
+    if (!currentMedia || currentMedia.type !== 'tv') { btn.style.display = 'none'; return; }
+    btn.style.display = getNextEpisodeRef() ? '' : 'none';
+  }
+
   function clearSourceCache() {
     sourceCache.url = null;
     sourceCache.hlsUrl = null;
@@ -1361,15 +1531,16 @@
     });
   }
 
-  function resolveHybridStream(item, type, sNum, eNum, retryCount) {
+  function resolveHybridStream(item, type, sNum, eNum, retryCount, silent) {
     return new Promise(function (resolve, reject) {
       var timeoutRetries = retryCount || 0;
+      var quiet = !!silent;
       var url = '/api/torbox-source?tmdbId=' + item.id + '&type=' + type;
       if (type === 'tv') url += '&season=' + sNum + '&episode=' + eNum;
       if (forceRefresh) url += '&refresh=1';
 
       function scrapeAndDownload(imdbId) {
-        showLoader(true, 'Searching torrent sources (first lookup can take up to ~45s)...');
+        if (!quiet) showLoader(true, 'Searching torrent sources (first lookup can take up to ~45s)...');
         browserScrapeStreams(imdbId, type, sNum, eNum).then(function (streams) {
           if (!streams || !streams.length) throw new Error('no torrents found');
           return fetchJson('/api/torbox-source', {
@@ -1387,7 +1558,7 @@
           }, 'TorBox stream create');
         }).then(function (data) {
           if (data && data.downloading && data.torrentId) {
-            return pollTorrentStream(item, type, sNum, eNum, data.torrentId, data.torrentHash, data.torrentTitle);
+            return pollTorrentStream(item, type, sNum, eNum, data.torrentId, data.torrentHash, data.torrentTitle, quiet);
           }
           if (!data || (!data.hlsUrl && !data.directUrl)) throw new Error('No cached torrent');
           return data;
@@ -1408,9 +1579,9 @@
       }).catch(function (err) {
         clearTimeout(timeout);
         if (isRetryableStreamError(err) && timeoutRetries < 1) {
-          showLoader(true, 'Stream is still preparing. Retrying...');
+          if (!quiet) showLoader(true, 'Stream is still preparing. Retrying...');
           retryAfterDelay(function () {
-            return resolveHybridStream(item, type, sNum, eNum, timeoutRetries + 1).then(resolve, reject);
+            return resolveHybridStream(item, type, sNum, eNum, timeoutRetries + 1, quiet).then(resolve, reject);
           }, 3000).catch(reject);
           return;
         }
@@ -1421,8 +1592,9 @@
     });
   }
 
-  function pollTorrentStream(item, type, sNum, eNum, torrentId, torrentHash, torrentTitle) {
+  function pollTorrentStream(item, type, sNum, eNum, torrentId, torrentHash, torrentTitle, silent) {
     return new Promise(function (resolve, reject) {
+      var quiet = !!silent;
       var url = '/api/torbox-source?tmdbId=' + item.id + '&type=' + type;
       if (type === 'tv') url += '&season=' + sNum + '&episode=' + eNum;
       url += '&action=progress&torrentId=' + encodeURIComponent(torrentId);
@@ -1430,7 +1602,7 @@
       if (torrentTitle) url += '&title=' + encodeURIComponent(String(torrentTitle).slice(0, 150));
 
       var started = Date.now();
-      var MAX_WAIT = 4 * 60 * 1000;
+      var MAX_WAIT = 10 * 60 * 1000;
       var POLL_INTERVAL = 4000;
       var lastPct = 0;
       var failures = 0;
@@ -1440,20 +1612,20 @@
           reject(new Error('Download is taking too long. Try again later.'));
           return;
         }
-        showLoader(true, 'Preparing stream (downloading to server)... ' + lastPct + '%');
+          if (!quiet) showLoader(true, 'Preparing stream... ' + lastPct + '%', lastPct);
         var controller = new AbortController();
         var t = setTimeout(function () { controller.abort(); }, 9000);
         fetchJson(url, { signal: controller.signal, cache: 'no-store' }, 'TorBox progress poll').then(function (data) {
           clearTimeout(t);
           if (data && (data.hlsUrl || data.directUrl)) { resolve(data); return; }
           if (data && typeof data.progress === 'number') lastPct = Math.round(data.progress);
-          showLoader(true, 'Preparing stream (downloading to server)... ' + lastPct + '%');
+        if (!quiet) showLoader(true, 'Preparing stream... ' + lastPct + '%', lastPct);
           setTimeout(tick, POLL_INTERVAL);
         }).catch(function (err) {
           clearTimeout(t);
           failures++;
           if (isRetryableStreamError(err)) {
-            showLoader(true, 'Stream is still preparing. Retrying...');
+            if (!quiet) showLoader(true, 'Stream is still preparing. Retrying...');
             setTimeout(tick, POLL_INTERVAL);
             return;
           }
@@ -1470,6 +1642,7 @@
 
   function preFetchSource(item, type, season, episode) {
     if (!item || !item.id) return Promise.reject(new Error('no item'));
+    if (isFutureRelease(item)) return Promise.resolve();
     var sNum = season || 1;
     var eNum = episode || 1;
     var url = '/api/torbox-source?tmdbId=' + item.id + '&type=' + type;
@@ -1620,11 +1793,11 @@
   }
 
   function openPlayer(item, mediaType) {
+    if (isBlockedItem(item)) return;
     if (isFutureRelease(item)) {
       showPlayerError('Available on a future date upon official release');
       return;
     }
-    initServerSelector();
     currentMedia = { item: item, type: mediaType };
     currentPlaybackId = newPlaybackId();
     currentStreamRequestId = currentPlaybackId;
@@ -1634,6 +1807,7 @@
     playerIframe.setAttribute('allow', 'autoplay; encrypted-media; fullscreen; picture-in-picture');
     playerIframe.style.cssText = 'width:100%; height:100%; border:0; display:block;';
 
+    stopVideoPlayback();
     document.getElementById('hls-video').style.display = 'none';
     playerIframe.src = 'about:blank';
 
@@ -1745,6 +1919,70 @@
     else clearSearchResults();
   }
 
+  function openSearchOverlay() {
+    var overlay = document.getElementById('search-overlay');
+    var input = document.getElementById('search-overlay-input');
+    if (!overlay || !input) return;
+    overlay.classList.remove('hidden');
+    input.value = '';
+    var results = document.getElementById('search-overlay-results');
+    if (results) results.innerHTML = '';
+    document.body.style.overflow = 'hidden';
+    setTimeout(function () { input.focus(); }, 50);
+  }
+
+  function closeSearchOverlay() {
+    var overlay = document.getElementById('search-overlay');
+    if (!overlay) return;
+    overlay.classList.add('hidden');
+    document.body.style.overflow = '';
+  }
+
+  function handleOverlaySearch() {
+    var input = document.getElementById('search-overlay-input');
+    var results = document.getElementById('search-overlay-results');
+    if (!input || !results) return;
+    var query = input.value.trim();
+    clearTimeout(searchOverlayTimeout);
+    if (query.length < 2) {
+      results.innerHTML = '';
+      return;
+    }
+    searchOverlayTimeout = setTimeout(function () {
+      fetchTMDB('/search/multi?query=' + encodeURIComponent(query) + '&include_adult=false').then(function (items) {
+        var filtered = items.filter(function (r) { return r.media_type === 'movie' || r.media_type === 'tv'; });
+        results.innerHTML = '';
+        if (!filtered.length) {
+          var empty = document.createElement('div');
+          empty.className = 'search-empty';
+          empty.textContent = 'No results found.';
+          results.appendChild(empty);
+          return;
+        }
+        var grid = document.createElement('div');
+        grid.className = 'search-results-grid';
+        for (var oi = 0; oi < filtered.length; oi++) {
+          var oCard = createCard(filtered[oi], filtered[oi].media_type);
+          if (oCard) grid.appendChild(oCard);
+        }
+        results.appendChild(grid);
+      });
+    }, 350);
+  }
+
+  function handleMobileNav(action) {
+    if (action === 'home') {
+      setFilter('all');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } else if (action === 'search') {
+      openSearchOverlay();
+    } else if (action === 'library') {
+      var cw = document.getElementById('continue-watching');
+      if (cw) cw.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      else window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }
+
   function handleSearch() {
     var query = searchInput.value.trim();
     if (query.length < 2) { clearSearchResults(); return; }
@@ -1770,7 +2008,10 @@
 
     var grid = document.createElement('div');
     grid.className = 'search-results-grid';
-    items.forEach(function (item) { grid.appendChild(createCard(item, item.media_type)); });
+    for (var si = 0; si < items.length; si++) {
+      var sCard = createCard(items[si], items[si].media_type);
+      if (sCard) grid.appendChild(sCard);
+    }
     section.appendChild(grid);
     content.appendChild(section);
   }
@@ -1825,6 +2066,7 @@
         playerIframe.src = 'about:blank';
         var subtitleEl = document.getElementById('player-subtitle');
         if (subtitleEl) subtitleEl.textContent = 'Season ' + (seasonSelect.value || 1) + ' · Episode ' + (this.value || 1);
+        updatePlayNextButton();
         attemptCustomPlayer().catch(function (err) {
           handleCustomPlayerFailure(err);
         });
@@ -1881,10 +2123,29 @@
       var video = document.getElementById('hls-video');
       if (video && isFinite(video.currentTime)) video.currentTime = Math.min(video.duration || video.currentTime, video.currentTime + 10);
     });
+    var playerNext = document.getElementById('player-next');
+    if (playerNext) playerNext.addEventListener('click', function () {
+      if (currentMedia && currentMedia.type === 'tv') nextEpisode();
+    });
 
     searchToggle.addEventListener('click', toggleSearch);
     searchInput.addEventListener('input', handleSearch);
     if (searchClose) searchClose.addEventListener('click', toggleSearch);
+
+    var mobileNavBtns = document.querySelectorAll('#mobile-nav .mobile-nav-btn');
+    for (var mn = 0; mn < mobileNavBtns.length; mn++) {
+      mobileNavBtns[mn].addEventListener('click', function () {
+        var action = this.getAttribute('data-action');
+        var btns = document.querySelectorAll('#mobile-nav .mobile-nav-btn');
+        for (var k = 0; k < btns.length; k++) btns[k].classList.remove('active');
+        if (action === 'home') this.classList.add('active');
+        handleMobileNav(action);
+      });
+    }
+    var overlayInput = document.getElementById('search-overlay-input');
+    var overlayClose = document.getElementById('search-overlay-close');
+    if (overlayInput) overlayInput.addEventListener('input', handleOverlaySearch);
+    if (overlayClose) overlayClose.addEventListener('click', closeSearchOverlay);
 
     for (var i = 0; i < navBtns.length; i++) {
       navBtns[i].addEventListener('click', function () { setFilter(this.getAttribute('data-filter')); });

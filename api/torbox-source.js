@@ -7,7 +7,7 @@ var UPSTASH_URL = process.env.UPSTASH_REDIS_REST_URL;
 var UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 var UPSTASH_RESULT_TTL = 3 * 60 * 60;
 var UPSTASH_TR_TTL = 24 * 60 * 60;
-var CACHE_VERSION = 'v2';
+var CACHE_VERSION = 'v4';
 
 // ---- In-memory caches (per-instance, best-effort) ----
 var RESULT_CACHE = {};
@@ -259,6 +259,10 @@ function normalizeText(text) {
     .trim();
 }
 
+function is3DFile(title) {
+  return /\b3d\b|3d-|hsbs|full ?sbs|\bsbs\b|stereoscopic|anaglyph/i.test(String(title || ''));
+}
+
 function buildTitleTokens(title) {
   return normalizeText(title)
     .split(' ')
@@ -287,6 +291,8 @@ function scoreVideoFileName(fileName, candTitle, type, season, episode) {
   if (/sample|trailer|teaser|promo|preview|behind the scenes|featurette|clip|music video|song|soundtrack|ost|opening|ending|extras?|bonus|deleted scenes?|subtitle|sample/.test(name)) {
     score -= 20;
   }
+
+  if (is3DFile(fileName)) score -= 30;
 
   if (/full movie|complete movie|main movie|feature|movie/.test(name)) score += 3;
   if (/\b(1080|2160|720|480)p\b/.test(name)) score += 2;
@@ -333,10 +339,24 @@ function sortCandidates(candidates) {
   return scored.map(function (s) { return s.cand; });
 }
 
-// Find the first cached candidate. Checks up to maxChecked hashes in batched requests.
+// Score a cached torrent: AVC over HEVC, higher quality, small/quick, not a giant pack.
+function scoreCachedCandidate(cand) {
+  var codec = parseCodec(cand.title);
+  var quality = parseQuality(cand.title);
+  var size = parseSizeGB(cand.title);
+  var score = (codec === 'avc' ? 60 : codec === 'hevc' ? 30 : 10) + quality * 5;
+  if (is3DFile(cand.title)) score -= 60;
+  if (size > 0 && size > 40) score -= 40;
+  if (size > 0 && size <= 3) score += 6;
+  if (/pack|collection|complete|box ?set|season/i.test(cand.title || '')) score -= 6;
+  return score;
+}
+
+// Find the best cached candidate. Checks up to maxChecked hashes in batched requests.
 async function findCachedCandidate(candidates, maxChecked) {
   var limit = Math.min(maxChecked || 100, candidates.length);
   var BATCH = 50;
+  var cachedFound = [];
   for (var start = 0; start < limit; start += BATCH) {
     var chunk = candidates.slice(start, start + BATCH);
     var hashList = chunk.map(function (c) { return c.cleanHash; }).join(',');
@@ -344,12 +364,17 @@ async function findCachedCandidate(candidates, maxChecked) {
     var map = parseCheckcachedMap(j);
     for (var i = 0; i < chunk.length; i++) {
       var entry = map[chunk[i].cleanHash];
-      if (entry && entry.cached !== false) {
-        return { cand: chunk[i], files: entry.files || [] };
+      if (entry && entry.cached !== false && !is3DFile(chunk[i].title)) {
+        cachedFound.push({ cand: chunk[i], files: entry.files || [] });
       }
     }
+    if (cachedFound.length) break;
   }
-  return null;
+  if (!cachedFound.length) return null;
+  cachedFound.sort(function (a, b) {
+    return scoreCachedCandidate(b.cand) - scoreCachedCandidate(a.cand);
+  });
+  return cachedFound[0];
 }
 
 // ---- TorBox error mapping ----
@@ -452,6 +477,17 @@ function parseSizeGB(title) {
   return m ? parseFloat(m[1]) : 0;
 }
 
+function fileSizeBytes(f) {
+  if (!f) return 0;
+  var n = parseFloat(f.size || f.bytes || f.length || f.size_bytes || 0);
+  if (isFinite(n) && n > 0) return n;
+  var m = /(\d+(?:\.\d+)?)\s*(?:GB|GiB)/i.exec(f.name || f.short_name || '');
+  if (m) return parseFloat(m[1]) * 1024 * 1024 * 1024;
+  var mb = /(\d+(?:\.\d+)?)\s*(?:MB|MiB)/i.exec(f.name || f.short_name || '');
+  if (mb) return parseFloat(mb[1]) * 1024 * 1024;
+  return 0;
+}
+
 // Best candidate to actually download: AVC first, good quality, but not a giant remux.
 function pickDownloadCandidate(candidates) {
   var best = null;
@@ -462,8 +498,10 @@ function pickDownloadCandidate(candidates) {
     var quality = parseQuality(c.title);
     var size = parseSizeGB(c.title);
     var score = (codec === 'avc' ? 100 : codec === 'hevc' ? 60 : 30) + quality * 10;
+    if (is3DFile(c.title)) score -= 60;
     if (size > 0 && size > 40) score -= 60;
     if (size > 0 && size <= 3) score += 8;
+    if (/pack|collection|complete|box ?set|season/i.test(c.title || '')) score -= 30;
     if (score > bestScore) { bestScore = score; best = c; }
   }
   return best || (candidates[0] || null);
@@ -497,17 +535,19 @@ function pickVideoFile(files, type, season, episode, cand) {
       return {
         file: f,
         idx: idx,
+        size: fileSizeBytes(f),
         score: scoreVideoFileName(name, cand && cand.title, type, season, episode)
       };
     });
 
     scored.sort(function (a, b) {
       if (b.score !== a.score) return b.score - a.score;
+      if (b.size !== a.size) return b.size - a.size;
       return a.idx - b.idx;
     });
 
     var best = scored[0] ? scored[0].file : null;
-    fileId = best ? best.id : null;
+    fileId = best && best.id !== undefined ? best.id : (scored[0] ? scored[0].idx : null);
   }
   if (fileId === null || fileId === undefined) fileId = cand && cand.fileIdx;
   if (fileId === null || fileId === undefined) fileId = 0;
@@ -528,13 +568,20 @@ function pickVideoFileCandidates(files, type, season, episode, cand) {
     return {
       file: f,
       idx: idx,
+      size: fileSizeBytes(f),
       score: scoreVideoFileName(name, cand && cand.title, type, season, episode)
     };
   }).sort(function (a, b) {
     if (b.score !== a.score) return b.score - a.score;
+    if (b.size !== a.size) return b.size - a.size;
     return a.idx - b.idx;
   }).map(function (entry) {
-    return entry.file;
+    var f = entry.file;
+    if (f.id !== undefined) return f;
+    var copy = {};
+    for (var k in f) { if (Object.prototype.hasOwnProperty.call(f, k)) copy[k] = f[k]; }
+    copy.id = entry.idx;
+    return copy;
   });
 }
 
@@ -891,6 +938,6 @@ export default async function handler(req, res) {
 
     return res.status(result.status).json(result.payload);
   } catch (err) {
-    return res.status(404).json({ error: 'Stream lookup failed. Try again or use the server selector.' });
+    return res.status(404).json({ error: 'Stream lookup failed. Please try again.' });
   }
 }

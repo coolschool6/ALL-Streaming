@@ -77,7 +77,10 @@ function createResponseAdapter(res) {
 async function loadApiHandler(route) {
   if (!apiModules[route]) {
     const moduleUrl = new URL(`../api/${route}.js`, import.meta.url);
-    apiModules[route] = import(moduleUrl.href);
+    apiModules[route] = import(moduleUrl.href).catch((err) => {
+      delete apiModules[route];
+      throw err;
+    });
   }
   const mod = await apiModules[route];
   return mod.default;
