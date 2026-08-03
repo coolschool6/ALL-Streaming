@@ -10,7 +10,6 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Grenze+Gotisch:wght@400;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
-  <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
   <script>
     (function(){
       var et = localStorage.getItem('asfr_expiry_time');
@@ -140,17 +139,71 @@
       </div>
       <video id="hls-video" class="hls-video" crossorigin playsinline webkit-playsinline style="display:none; width:100%; height:100%;"></video>
       <div id="player-overlay"></div>
-      <div class="player-quickbar" id="player-quickbar">
-        <button class="player-btn" id="player-skip-back" title="Skip back 10s">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>
-        </button>
-        <button class="player-btn player-next" id="player-next" title="Play next episode" style="display:none;">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
-          <span class="player-next-label">Next</span>
-        </button>
-        <button class="player-btn" id="player-skip-forward" title="Skip forward 10s">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z"/></svg>
-        </button>
+      <div class="nf-controls" id="nf-controls">
+        <div class="nf-actions">
+          <button class="nf-skip-intro" id="nf-skip-intro" style="display:none;" aria-label="Skip Intro">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+            <span>Skip Intro</span>
+          </button>
+        </div>
+
+        <div class="nf-center" id="nf-center">
+          <button class="nf-play-big" id="nf-play-big" aria-label="Play">
+            <svg width="42" height="42" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+          </button>
+        </div>
+
+        <div class="nf-bottom">
+          <div class="nf-progress" id="nf-progress" aria-label="Seek">
+            <div class="nf-buffered" id="nf-buffered"></div>
+            <div class="nf-played" id="nf-played"></div>
+            <div class="nf-scrubber" id="nf-scrubber"></div>
+            <div class="nf-tooltip" id="nf-tooltip"></div>
+          </div>
+          <div class="nf-bottom-row">
+            <button class="nf-btn" id="nf-play" aria-label="Play/Pause">
+              <svg id="nf-play-ic" width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+            </button>
+            <button class="nf-btn" id="player-skip-back" title="Back 10 seconds" aria-label="Back 10 seconds">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>
+            </button>
+            <button class="nf-btn" id="player-skip-forward" title="Forward 10 seconds" aria-label="Forward 10 seconds">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z"/></svg>
+            </button>
+            <div class="nf-volwrap">
+              <button class="nf-btn" id="nf-mute" aria-label="Mute">
+                <svg id="nf-vol-ic" width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+              </button>
+              <div class="nf-volpop">
+                <input type="range" id="nf-vol" min="0" max="100" value="100" aria-label="Volume">
+              </div>
+            </div>
+            <span class="nf-time" id="nf-time">0:00 / 0:00</span>
+            <div class="nf-grow"></div>
+            <div class="nf-settingswrap">
+              <button class="nf-btn" id="nf-settings-btn" aria-label="Settings">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94a7.5 7.5 0 0 0 .05-.94c0-.32-.02-.63-.05-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.61-.22l-2.39.96a7.2 7.2 0 0 0-1.62-.94l-.36-2.54a.5.5 0 0 0-.49-.42h-3.84a.5.5 0 0 0-.49.42l-.36 2.54c-.59.24-1.13.56-1.62.94l-2.39-.96a.5.5 0 0 0-.61.22L2.83 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.5 7.5 0 0 0-.05.94c0 .32.02.63.05.94L2.95 14.5a.5.5 0 0 0-.12.64l1.92 3.32c.14.24.42.34.67.22l2.39-.96c.49.38 1.03.7 1.62.94l.36 2.54c.05.24.24.42.49.42h3.84c.25 0 .44-.18.49-.42l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.25.12.53.02.67-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5z"/></svg>
+              </button>
+              <div class="nf-menu hidden" id="nf-menu">
+                <div class="nf-menu-group">
+                  <div class="nf-menu-title">Playback Speed</div>
+                  <div class="nf-menu-opts" id="nf-speed-opts"></div>
+                </div>
+              </div>
+            </div>
+            <button class="nf-btn" id="nf-pip" style="display:none;" aria-label="Picture in Picture">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M19 11h-8v6h8v-6zm4 8V5c0-1.1-.9-2-2-2H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2zm-2 0H3V5h18v14z"/></svg>
+            </button>
+            <button class="nf-btn" id="nf-fullscreen" aria-label="Fullscreen">
+              <svg id="nf-fs-ic" width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
+            </button>
+            <button class="nf-btn" id="player-next" title="Play next episode" style="display:none;">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="nf-flash" id="nf-flash" style="display:none;"></div>
       </div>
     </div>
   </div>
@@ -360,7 +413,6 @@
   </style>
 
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
-  <script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

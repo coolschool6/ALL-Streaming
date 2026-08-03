@@ -7,12 +7,14 @@ var UPSTASH_URL = process.env.UPSTASH_REDIS_REST_URL;
 var UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 var UPSTASH_RESULT_TTL = 3 * 60 * 60;
 var UPSTASH_TR_TTL = 24 * 60 * 60;
-var CACHE_VERSION = 'v4';
+var CACHE_VERSION = 'v6';
 
 // ---- In-memory caches (per-instance, best-effort) ----
 var RESULT_CACHE = {};
 var RESULT_CACHE_TTL = 3 * 60 * 60 * 1000;
 var RESULT_CACHE_MAX = 400;
+
+var DOWNLOAD_QUEUE = {};
 
 var IMDB_CACHE = {};
 var IMDB_CACHE_TTL = 24 * 60 * 60 * 1000;
@@ -377,6 +379,29 @@ async function findCachedCandidate(candidates, maxChecked) {
   return cachedFound[0];
 }
 
+async function findCachedCandidates(candidates, maxChecked) {
+  var limit = Math.min(maxChecked || 100, candidates.length);
+  var BATCH = 50;
+  var cachedFound = [];
+  for (var start = 0; start < limit; start += BATCH) {
+    var chunk = candidates.slice(start, start + BATCH);
+    var hashList = chunk.map(function (c) { return c.cleanHash; }).join(',');
+    var j = await torboxFetch('/torrents/checkcached?hash=' + hashList + '&format=object&list_files=true', 8000);
+    var map = parseCheckcachedMap(j);
+    for (var i = 0; i < chunk.length; i++) {
+      var entry = map[chunk[i].cleanHash];
+      if (entry && entry.cached !== false && !is3DFile(chunk[i].title)) {
+        cachedFound.push({ cand: chunk[i], files: entry.files || [] });
+      }
+    }
+  }
+  if (!cachedFound.length) return [];
+  cachedFound.sort(function (a, b) {
+    return scoreCachedCandidate(b.cand) - scoreCachedCandidate(a.cand);
+  });
+  return cachedFound;
+}
+
 // ---- TorBox error mapping ----
 function extractTorBoxError(json) {
   if (!json) return '';
@@ -400,6 +425,89 @@ function torboxErrorCode(json) {
     if (typeof json.error === 'string' && /^[A-Z_]+$/.test(json.error)) return json.error;
   }
   return '';
+}
+
+function isBozoError(err) {
+  if (!err) return false;
+  var code = String(err.torboxError || err.code || '').toUpperCase();
+  if (code === 'BOZO_FILE') return true;
+  var msg = String(err.error || err.message || '').toUpperCase();
+  return msg.indexOf('BOZO_FILE') !== -1 || msg.indexOf('BAD FILE') !== -1;
+}
+
+// ---- Segment-level health check for TorBox stream URLs ----
+// createStream can succeed even when the underlying file never delivers bytes;
+// these are the "bozo" files that hang at the CDN level. We verify the first
+// media segment actually flows before committing to a stream.
+var GOOD_STREAM_SET = {};
+var BAD_STREAM_SET = {};
+
+function resolveStreamUrl(base, ref) {
+  if (/^https?:\/\//i.test(ref)) return ref;
+  if (ref.charAt(0) === '/') {
+    var m = /^(https?:\/\/[^/]+)/i.exec(base);
+    return m ? m[1] + ref : base + ref;
+  }
+  return base.slice(0, base.lastIndexOf('/') + 1) + ref;
+}
+
+function firstPlaylistLine(txt) {
+  var lines = txt.split('\n');
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i].trim();
+    if (line && line.charAt(0) !== '#') return line;
+  }
+  return null;
+}
+
+async function fetchPlaylistText(url) {
+  var r = await fetch(url, { signal: AbortSignal.timeout(9000) });
+  if (!r.ok) throw new Error('playlist status ' + r.status);
+  return r.text();
+}
+
+async function verifyHlsSegment(hlsUrl) {
+  if (typeof fetch !== 'function') return true;
+  try {
+    var txt = await fetchPlaylistText(hlsUrl);
+    var line = firstPlaylistLine(txt);
+    if (!line) return false;
+    if (/\.m3u8($|\?)/i.test(line)) {
+      txt = await fetchPlaylistText(resolveStreamUrl(hlsUrl, line));
+      line = firstPlaylistLine(txt);
+      if (!line || /\.m3u8($|\?)/i.test(line)) return false;
+    }
+    var seg = await fetch(resolveStreamUrl(hlsUrl, line), { signal: AbortSignal.timeout(9000) });
+    if (!seg.ok) throw new Error('segment status ' + seg.status);
+    var reader = seg.body.getReader();
+    var chunk = await reader.read();
+    return !!(chunk.value && chunk.value.byteLength > 0);
+  } catch (e) {
+    return false;
+  }
+}
+
+async function verifyDirectUrl(url) {
+  if (typeof fetch !== 'function') return true;
+  try {
+    var r = await fetch(url, { signal: AbortSignal.timeout(9000), headers: { Range: 'bytes=0-1023' } });
+    if (!r.ok && r.status !== 206) return false;
+    var buf = await r.arrayBuffer();
+    return buf.byteLength > 0;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function verifyStream(stream) {
+  if (!stream || (!stream.hlsUrl && !stream.directUrl)) return { ok: false, key: null };
+  var key = stream.hlsUrl || stream.directUrl;
+  if (GOOD_STREAM_SET[key]) return { ok: true, key: key };
+  if (BAD_STREAM_SET[key]) return { ok: false, key: key };
+  var ok = stream.hlsUrl ? await verifyHlsSegment(stream.hlsUrl) : await verifyDirectUrl(stream.directUrl);
+  if (ok) GOOD_STREAM_SET[key] = true;
+  else BAD_STREAM_SET[key] = true;
+  return { ok: ok, key: key };
 }
 
 function extractHlsUrl(json) {
@@ -489,22 +597,27 @@ function fileSizeBytes(f) {
 }
 
 // Best candidate to actually download: AVC first, good quality, but not a giant remux.
+function downloadScore(c) {
+  var codec = parseCodec(c.title);
+  var quality = parseQuality(c.title);
+  var size = parseSizeGB(c.title);
+  var score = (codec === 'avc' ? 100 : codec === 'hevc' ? 60 : 30) + quality * 10;
+  if (is3DFile(c.title)) score -= 60;
+  if (size > 0 && size > 40) score -= 60;
+  if (size > 0 && size <= 3) score += 8;
+  if (/pack|collection|complete|box ?set|season/i.test(c.title || '')) score -= 30;
+  return score;
+}
+
+function rankDownloadCandidates(candidates) {
+  if (!candidates || !candidates.length) return [];
+  return candidates.slice().sort(function (a, b) {
+    return downloadScore(b) - downloadScore(a);
+  });
+}
+
 function pickDownloadCandidate(candidates) {
-  var best = null;
-  var bestScore = -Infinity;
-  for (var i = 0; i < candidates.length; i++) {
-    var c = candidates[i];
-    var codec = parseCodec(c.title);
-    var quality = parseQuality(c.title);
-    var size = parseSizeGB(c.title);
-    var score = (codec === 'avc' ? 100 : codec === 'hevc' ? 60 : 30) + quality * 10;
-    if (is3DFile(c.title)) score -= 60;
-    if (size > 0 && size > 40) score -= 60;
-    if (size > 0 && size <= 3) score += 8;
-    if (/pack|collection|complete|box ?set|season/i.test(c.title || '')) score -= 30;
-    if (score > bestScore) { bestScore = score; best = c; }
-  }
-  return best || (candidates[0] || null);
+  return rankDownloadCandidates(candidates)[0] || null;
 }
 
 function findExistingTorrentId(hash) {
@@ -737,10 +850,26 @@ async function processProgressPoll(req) {
 
   var cand = hash ? { cleanHash: String(hash).toLowerCase(), title: title || '' } : null;
   var stream = await resolveStreamOrDirect(torrentId, prog.files, type, season, episode, cand);
-  if (!stream || (!stream.hlsUrl && !stream.directUrl)) {
+  var verified = await verifyStream(stream);
+  if (!verified.ok) {
+    var queue = DOWNLOAD_QUEUE[String(torrentId)];
+    var isBadStream = !!verified.key;
+    if ((isBadStream || isBozoError(stream)) && queue && queue.nextIdx < queue.cands.length) {
+      var next = queue.cands[queue.nextIdx];
+      queue.nextIdx += 1;
+      try { await torboxRequest('/torrents/delete?id=' + torrentId, 'GET', null, 4000); } catch (e) {}
+      var dl = await startTorrentDownload(next, queue.type || type, queue.season || season, queue.episode || episode);
+      if (dl && dl.torrentId) {
+        DOWNLOAD_QUEUE[String(dl.torrentId)] = queue;
+        return {
+          status: 202,
+          payload: { downloading: true, progress: 0, retry: true, torrentId: dl.torrentId, torrentHash: dl.hash, torrentTitle: dl.title || '' }
+        };
+      }
+    }
     return {
       status: 404,
-      payload: { error: (stream && stream.error) || 'Could not start streaming this torrent.', torboxError: (stream && stream.torboxError) || 'stream_failed', fileId: stream && stream.fileId }
+      payload: { error: (stream && stream.error) || 'Could not start streaming this torrent.', torboxError: (stream && stream.torboxError) || 'BOZO_FILE', fileId: stream && stream.fileId, bozo: true }
     };
   }
   return { status: 200, payload: stream };
@@ -748,32 +877,45 @@ async function processProgressPoll(req) {
 
 // ---- Build a TorBox stream from a list of torrent candidates ----
 async function buildTorBoxStream(candidates, type, season, episode) {
-  var best = await findCachedCandidate(candidates, 100);
-  if (!best) return null;
+  var cachedList = await findCachedCandidates(candidates, 100);
+  if (!cachedList.length) return null;
 
-  var hash = best.cand.cleanHash;
-  var cachedFiles = best.files;
+  var lastErr = null;
+  for (var ci = 0; ci < cachedList.length; ci++) {
+    var best = cachedList[ci];
+    var hash = best.cand.cleanHash;
+    var cachedFiles = best.files;
 
-  // Reuse existing torrent in the account when possible
-  var torrentId = await findExistingTorrentId(hash);
-  if (!torrentId) {
-    var magnet = 'magnet:?xt=urn:btih:' + hash;
-    var createBody = new URLSearchParams();
-    createBody.append('magnet', magnet);
-    createBody.append('add_only_if_cached', 'true');
-    if (type === 'tv') createBody.append('name', hash.slice(0, 8) + '_S' + season + 'E' + episode);
+    // Reuse existing torrent in the account when possible
+    var torrentId = await findExistingTorrentId(hash);
+    if (!torrentId) {
+      var magnet = 'magnet:?xt=urn:btih:' + hash;
+      var createBody = new URLSearchParams();
+      createBody.append('magnet', magnet);
+      createBody.append('add_only_if_cached', 'true');
+      if (type === 'tv') createBody.append('name', hash.slice(0, 8) + '_S' + season + 'E' + episode);
 
-    var created = await torboxPost('/torrents/createtorrent', createBody.toString(), 5000);
-    if (created && created.success && created.data) {
-      torrentId = created.data.torrent_id || created.data.id;
+      var created = await torboxPost('/torrents/createtorrent', createBody.toString(), 5000);
+      if (created && created.success && created.data) {
+        torrentId = created.data.torrent_id || created.data.id;
+      }
     }
-  }
 
-  if (!torrentId) {
-    return { error: 'Torrent is cached but could not be added to your TorBox account.', torboxError: 'no_torrent_id' };
-  }
+    if (!torrentId) {
+      lastErr = { error: 'Torrent is cached but could not be added to your TorBox account.', torboxError: 'no_torrent_id' };
+      continue;
+    }
 
-  return await resolveStreamOrDirect(torrentId, cachedFiles, type, season, episode, best.cand);
+    var stream = await resolveStreamOrDirect(torrentId, cachedFiles, type, season, episode, best.cand);
+    if (stream && (stream.hlsUrl || stream.directUrl)) {
+      var v = await verifyStream(stream);
+      if (v.ok) return stream;
+      lastErr = { error: 'TorBox file is currently unavailable (bad file).', torboxError: 'BOZO_FILE', bozo: true };
+      continue;
+    }
+    lastErr = stream || lastErr;
+  }
+  return lastErr || null;
 }
 
 // ---- Main pipeline (hybrid: client scrapes in-browser, server talks to TorBox) ----
@@ -848,12 +990,14 @@ async function processStreamRequest(req) {
 
   // 5. Nothing cached -> start a download that the client polls to completion
   if (download) {
-    var cand = pickDownloadCandidate(candidates);
+    var ranked = rankDownloadCandidates(candidates);
+    var cand = ranked[0] || null;
     if (!cand) {
       return { status: 404, payload: { error: 'No usable torrent candidate found.', imdbId: imdbId, noCached: true } };
     }
     var dl = await startTorrentDownload(cand, type, season, episode);
     if (dl && dl.torrentId) {
+      DOWNLOAD_QUEUE[String(dl.torrentId)] = { cands: ranked, nextIdx: 1, type: type, season: season, episode: episode, imdbId: imdbId };
       return {
         status: 202,
         payload: { downloading: true, torrentId: dl.torrentId, torrentHash: dl.hash, torrentTitle: dl.title || '', imdbId: imdbId }
