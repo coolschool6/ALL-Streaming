@@ -7,7 +7,7 @@ var UPSTASH_URL = process.env.UPSTASH_REDIS_REST_URL;
 var UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 var UPSTASH_RESULT_TTL = 3 * 60 * 60;
 var UPSTASH_TR_TTL = 24 * 60 * 60;
-var CACHE_VERSION = 'v6';
+var CACHE_VERSION = 'v8';
 
 // ---- In-memory caches (per-instance, best-effort) ----
 var RESULT_CACHE = {};
@@ -38,10 +38,12 @@ function cacheSet(key, payload) {
   RESULT_CACHE[key] = { t: Date.now(), payload: payload };
 }
 
-// Cached entries are stored as { url, direct, source, debug } (legacy: { hlsUrl, source, debug }).
+// Cached entries are stored as { url, direct, source, debug, sourceTitle, sourceWarning } (legacy: { hlsUrl, source, debug }).
 function normalizeCachedPayload(entry) {
   if (!entry) return null;
   var out = { source: entry.source || 'TorBox', debug: entry.debug || null };
+  if (entry.sourceTitle) out.sourceTitle = entry.sourceTitle;
+  if (entry.sourceWarning) out.sourceWarning = entry.sourceWarning;
   if (entry.direct) {
     out.directUrl = entry.url;
     out.direct = true;
@@ -60,7 +62,9 @@ function toCacheStore(payload) {
     url: payload.hlsUrl || payload.directUrl,
     direct: !!payload.directUrl,
     source: payload.source || 'TorBox',
-    debug: payload.debug || null
+    debug: payload.debug || null,
+    sourceTitle: payload.sourceTitle || '',
+    sourceWarning: payload.sourceWarning || ''
   };
 }
 
@@ -253,6 +257,33 @@ function parseCodec(title) {
   return '';
 }
 
+// Penalize obvious foreign-dub tags so English/untagged releases win whenever available.
+var EN_FLAG = /\u{1F1FA}\u{1F1F8}|\u{1F1EC}\u{1F1E7}|\u{1F1E8}\u{1F1E7}|\u{1F1E6}\u{1F1F5}|\u{1F1EE}\u{1F1E8}|\u{1F1F3}\u{1F1FA}/u;
+function languagePenalty(title) {
+  var u = String(title || '').toUpperCase();
+  var score = 0;
+  if (/\bDUBBED\b|\bDUBBING\b|\bDUBLADO\b|\bPLDUB\b|\bUKR\b|\bVOSTFR\b|\bFRENCH\b|\bGERMAN\b|\bITALIAN\b|\bSPANISH\b|\bESPANOL\b|\bHINDI\b|\bTAMIL\b|\bTELUGU\b|\bARABIC\b|\bTURKISH\b|\bRUSSIAN\b|\bPOLISH\b|\bPOLSKI\b|\bRUS\b|\bLAT\b|\bDUB\b/i.test(u)) score -= 25;
+  if (/[\u{1F1E6}-\u{1F1FF}]/u.test(u) && !EN_FLAG.test(u)) score -= 12;
+  return score;
+}
+
+function buildSourceWarning(cand) {
+  var t = cand && cand.title ? String(cand.title) : '';
+  if (!t) return '';
+  var u = t.toUpperCase();
+  var lowQuality = /\b(CAM|HDCAM|TELESYNC|TS|TC|HDTS|SCR|DVDSCR|R5|R6)\b/.test(u) || !parseQuality(t);
+  var dubbed = languagePenalty(t) <= -20;
+  if (!lowQuality && !dubbed) return '';
+  var parts = [];
+  if (dubbed) parts.push('dubbed');
+  if (lowQuality) {
+    var q = parseQuality(t);
+    var tier = q === 4 ? '4K' : q === 3 ? '1080p' : q === 2 ? '720p' : q === 1 ? 'SD' : '';
+    parts.push('low-quality' + (tier ? ' ' + tier : ''));
+  }
+  return 'Only ' + parts.join(' / ') + ' sources are available for this title yet.';
+}
+
 function normalizeText(text) {
   return String(text || '')
     .toLowerCase()
@@ -273,7 +304,64 @@ function buildTitleTokens(title) {
     });
 }
 
-function scoreVideoFileName(fileName, candTitle, type, season, episode) {
+function extractYearFromTitle(title) {
+  var m = /(?:^|[^0-9])((?:19|20)\d{2})(?:[^0-9]|$)/.exec(String(title || ''));
+  return m ? parseInt(m[1], 10) : null;
+}
+
+// "moana 2" -> "moana"; "moana" -> "moana" (strips a trailing number off the base title)
+function baseTitleOf(normalizedTitle) {
+  return String(normalizedTitle || '').trim().replace(/\s+\d{1,3}$/, '');
+}
+
+// Trailing installment number of an expected title: "moana 2" -> 2, "moana" -> null
+function installmentOf(normalizedTitle) {
+  var m = /\b(\d{1,2})\s*$/.exec(String(normalizedTitle || '').trim());
+  return m ? parseInt(m[1], 10) : null;
+}
+
+// Number directly following the base title in a candidate, e.g. "moana 2 ..." -> 2.
+// A 4-digit year (2026) does NOT count as an installment.
+function candidateInstallment(baseTitle, title) {
+  if (!baseTitle) return null;
+  var escaped = baseTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  var re = new RegExp('\\b' + escaped + '(?:\\s+|\\.|-|_)*\\s*(\\d{1,2})(?![0-9])');
+  var m = re.exec(normalizeText(title));
+  return m ? parseInt(m[1], 10) : null;
+}
+
+// Drop torrents that clearly belong to a DIFFERENT movie: wrong year or wrong
+// installment ("Moana 2" served for "Moana" 2026). Movies only; TV relies on its
+// own S/E matching. Candidates with no title info are kept.
+function filterCandidatesForTitle(candidates, meta, type) {
+  if (type !== 'movie' || !candidates || !candidates.length || !meta || !meta.title) return candidates;
+  var expectedTitle = normalizeText(meta.title);
+  var baseTitle = baseTitleOf(expectedTitle);
+  var expectedInst = installmentOf(expectedTitle);
+  var expectedYear = meta.year || null;
+  if (!baseTitle || baseTitle.length < 2) return candidates;
+
+  var out = [];
+  for (var i = 0; i < candidates.length; i++) {
+    var c = candidates[i];
+    var rawTitle = c.title || '';
+    if (!rawTitle) { out.push(c); continue; }
+    var name = normalizeText(rawTitle);
+    if (name.indexOf(baseTitle) === -1) { out.push(c); continue; }
+
+    var inst = candidateInstallment(baseTitle, name);
+    if (inst !== null && inst !== expectedInst) continue;
+
+    if (expectedYear) {
+      var y = extractYearFromTitle(name);
+      if (y !== null && y !== expectedYear) continue;
+    }
+    out.push(c);
+  }
+  return out;
+}
+
+function scoreVideoFileName(fileName, candTitle, type, season, episode, expectedTitle, expectedYear) {
   var name = normalizeText(fileName);
   var score = 0;
   var tokens = buildTitleTokens(candTitle);
@@ -296,11 +384,26 @@ function scoreVideoFileName(fileName, candTitle, type, season, episode) {
 
   if (is3DFile(fileName)) score -= 30;
 
+  score += languagePenalty(candTitle || fileName);
+
   if (/full movie|complete movie|main movie|feature|movie/.test(name)) score += 3;
   if (/\b(1080|2160|720|480)p\b/.test(name)) score += 2;
   if (/\b(x264|x265|hevc|avc)\b/.test(name)) score += 2;
   if (/\b(bluray|web-dl|webrip|hdrip|remux)\b/.test(name)) score += 1;
   if (/\b(cam|ts|tc|scr|dvdscr)\b/.test(name)) score -= 8;
+
+  if (expectedTitle) {
+    var eTitle = normalizeText(expectedTitle);
+    var eBase = baseTitleOf(eTitle);
+    var eInst = installmentOf(eTitle);
+    if (eBase && name.indexOf(eBase) !== -1) score += 8;
+    var cInst = candidateInstallment(eBase, name);
+    if (cInst !== null && cInst !== eInst) score -= 15;
+    if (expectedYear) {
+      var fYear = extractYearFromTitle(name);
+      if (fYear !== null && fYear !== expectedYear) score -= 15;
+    }
+  }
 
   return score;
 }
@@ -351,6 +454,7 @@ function scoreCachedCandidate(cand) {
   if (size > 0 && size > 40) score -= 40;
   if (size > 0 && size <= 3) score += 6;
   if (/pack|collection|complete|box ?set|season/i.test(cand.title || '')) score -= 6;
+  score += languagePenalty(cand.title);
   return score;
 }
 
@@ -606,6 +710,7 @@ function downloadScore(c) {
   if (size > 0 && size > 40) score -= 60;
   if (size > 0 && size <= 3) score += 8;
   if (/pack|collection|complete|box ?set|season/i.test(c.title || '')) score -= 30;
+  score += languagePenalty(c.title);
   return score;
 }
 
@@ -632,7 +737,7 @@ function findExistingTorrentId(hash) {
   });
 }
 
-function pickVideoFile(files, type, season, episode, cand) {
+function pickVideoFile(files, type, season, episode, cand, meta) {
   var videoFiles = files.filter(function (f) {
     var name = (f.name || f.short_name || '').toLowerCase();
     var isVidMime = f.mimetype && f.mimetype.indexOf('video/') === 0;
@@ -649,7 +754,7 @@ function pickVideoFile(files, type, season, episode, cand) {
         file: f,
         idx: idx,
         size: fileSizeBytes(f),
-        score: scoreVideoFileName(name, cand && cand.title, type, season, episode)
+        score: scoreVideoFileName(name, cand && cand.title, type, season, episode, meta && meta.title, meta && meta.year)
       };
     });
 
@@ -667,7 +772,7 @@ function pickVideoFile(files, type, season, episode, cand) {
   return fileId;
 }
 
-function pickVideoFileCandidates(files, type, season, episode, cand) {
+function pickVideoFileCandidates(files, type, season, episode, cand, meta) {
   var videoFiles = files.filter(function (f) {
     var name = (f.name || f.short_name || '').toLowerCase();
     var isVidMime = f.mimetype && f.mimetype.indexOf('video/') === 0;
@@ -682,7 +787,7 @@ function pickVideoFileCandidates(files, type, season, episode, cand) {
       file: f,
       idx: idx,
       size: fileSizeBytes(f),
-      score: scoreVideoFileName(name, cand && cand.title, type, season, episode)
+      score: scoreVideoFileName(name, cand && cand.title, type, season, episode, meta && meta.title, meta && meta.year)
     };
   }).sort(function (a, b) {
     if (b.score !== a.score) return b.score - a.score;
@@ -710,8 +815,8 @@ function buildSourceMeta(cand) {
   return sourceName;
 }
 
-async function createStreamForTorrent(torrentId, files, type, season, episode, cand) {
-  var candidateFiles = pickVideoFileCandidates(files || [], type, season, episode, cand);
+async function createStreamForTorrent(torrentId, files, type, season, episode, cand, meta) {
+  var candidateFiles = pickVideoFileCandidates(files || [], type, season, episode, cand, meta);
   if (!candidateFiles.length) candidateFiles = [{ id: 0 }];
 
   var lastError = null;
@@ -743,6 +848,8 @@ async function createStreamForTorrent(torrentId, files, type, season, episode, c
     return {
       hlsUrl: hlsUrl,
       source: buildSourceMeta(cand),
+      sourceTitle: (cand && cand.title) || null,
+      sourceWarning: buildSourceWarning(cand),
       debug: {
         hash: cand ? cand.cleanHash : null,
         torrentId: torrentId,
@@ -770,8 +877,8 @@ function isBrowserPlayableFile(files, fileId, cand) {
 }
 
 // Native TorBox HLS only. We no longer use direct-download fallbacks for playback.
-async function resolveStreamOrDirect(torrentId, files, type, season, episode, cand) {
-  var stream = await createStreamForTorrent(torrentId, files, type, season, episode, cand);
+async function resolveStreamOrDirect(torrentId, files, type, season, episode, cand, meta) {
+  var stream = await createStreamForTorrent(torrentId, files, type, season, episode, cand, meta);
   if (stream && stream.hlsUrl) return stream;
   return stream || {
     error: 'TorBox could not create a native HLS stream for this title.',
@@ -876,7 +983,7 @@ async function processProgressPoll(req) {
 }
 
 // ---- Build a TorBox stream from a list of torrent candidates ----
-async function buildTorBoxStream(candidates, type, season, episode) {
+async function buildTorBoxStream(candidates, type, season, episode, meta) {
   var cachedList = await findCachedCandidates(candidates, 100);
   if (!cachedList.length) return null;
 
@@ -906,7 +1013,7 @@ async function buildTorBoxStream(candidates, type, season, episode) {
       continue;
     }
 
-    var stream = await resolveStreamOrDirect(torrentId, cachedFiles, type, season, episode, best.cand);
+    var stream = await resolveStreamOrDirect(torrentId, cachedFiles, type, season, episode, best.cand, meta);
     if (stream && (stream.hlsUrl || stream.directUrl)) {
       var v = await verifyStream(stream);
       if (v.ok) return stream;
@@ -926,9 +1033,13 @@ async function processStreamRequest(req) {
   var episode = req.query.episode || (req.body && req.body.episode) || '1';
   var givenImdb = req.query.imdbId || (req.body && req.body.imdbId);
 
-  // 1. Resolve IMDb ID from TMDB (cached) or from the client
+  // 1. Resolve IMDb ID from TMDB (cached) or from the client, and expected title/year for matching
+  var meta = {
+    title: req.query.title || (req.body && req.body.title) || null,
+    year: parseInt(req.query.year || (req.body && req.body.year) || '', 10) || null
+  };
   var imdbId = givenImdb || imdbCacheGet(tmdbId);
-  if (!imdbId) {
+  if (!imdbId || (type === 'movie' && !meta.title)) {
     if (type === 'tv') {
       var ext = await tmdbFetch('/tv/' + tmdbId + '/external_ids');
       imdbId = ext ? ext.imdb_id : null;
@@ -939,6 +1050,13 @@ async function processStreamRequest(req) {
     } else {
       var movie = await tmdbFetch('/movie/' + tmdbId);
       imdbId = movie ? movie.imdb_id : null;
+      if (movie) {
+        if (!meta.title) meta.title = movie.title || movie.original_title || null;
+        if (!meta.year) {
+          var rd = movie.release_date;
+          meta.year = rd ? parseInt(String(rd).substring(0, 4), 10) : null;
+        }
+      }
     }
     imdbCacheSet(tmdbId, imdbId);
   }
@@ -970,9 +1088,14 @@ async function processStreamRequest(req) {
     return { status: 404, payload: { error: 'No shared torrent sources for this title yet.', imdbId: imdbId, needsScrape: true } };
   }
 
+  // 3b. Drop torrents that clearly belong to a different movie (wrong year / wrong installment)
+  if (candidates.length) {
+    candidates = filterCandidatesForTitle(candidates, meta, type);
+  }
+
   // 4. TorBox path
   var download = req.query.download === '1' || req.query.download === 'true' || !!(req.body && req.body.download);
-  var torBoxResult = await buildTorBoxStream(candidates, type, season, episode);
+  var torBoxResult = await buildTorBoxStream(candidates, type, season, episode, meta);
   if (torBoxResult) {
     torBoxResult.imdbId = imdbId;
   }

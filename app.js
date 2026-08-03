@@ -252,7 +252,7 @@
   var currentMedia = null;
   var hlsInstance = null;
   var customActive = false;
-  var sourceCache = { url: null, hlsUrl: null, directUrl: null, direct: false, ready: false, warm: false };
+  var sourceCache = { url: null, hlsUrl: null, directUrl: null, direct: false, ready: false, warm: false, sourceTitle: '', sourceWarning: '' };
   var forceRefresh = false;
   var prefetchInFlight = {};
   var prefetchPromises = {};
@@ -987,6 +987,13 @@
     video.controls = false;
     video.removeAttribute('src');
 
+    var subtitleEl = document.getElementById('player-subtitle');
+    if (subtitleEl && currentMedia && currentMedia.type === 'movie') {
+      var srcLabel = (sourceCache.sourceTitle || sourceName || '').trim();
+      var warn = (sourceCache.sourceWarning || '').trim();
+      subtitleEl.textContent = srcLabel ? 'Now playing: ' + srcLabel + (warn ? ' — ' + warn : '') : (warn || '');
+    }
+
     attachPlaybackEvents();
     video.addEventListener('loadedmetadata', function () {
       if (currentPlaybackId !== pid) return;
@@ -1631,7 +1638,7 @@
   }
 
   var STREAM_CACHE_TTL = 24 * 60 * 60 * 1000;
-  var STREAM_CACHE_VERSION = 'v6';
+  var STREAM_CACHE_VERSION = 'v8';
   var STREAM_CACHE_VERSION_KEY = 'asfr_stream_cache_version';
 
   function clearLegacyStreamCache() {
@@ -1674,12 +1681,14 @@
     } catch (e) { return null; }
   }
 
-  function streamCacheSet(type, id, season, episode, url, source, direct) {
+  function streamCacheSet(type, id, season, episode, url, source, direct, sourceTitle, sourceWarning) {
     try {
       localStorage.setItem(streamCacheKey(type, id, season, episode), JSON.stringify({
         url: url,
         source: source || 'TorBox',
         direct: !!direct,
+        sourceTitle: sourceTitle || '',
+        sourceWarning: sourceWarning || '',
         t: Date.now()
       }));
     } catch (e) {}
@@ -1796,6 +1805,15 @@
     } catch (err) {}
   }
 
+  function clearProgressIfSourceChanged(type, id, s, e, newSourceTitle) {
+    if (!type || !id || !newSourceTitle) return;
+    var entry = progressGet(type, id, s, e);
+    if (!entry) return;
+    if (entry.src && entry.src === newSourceTitle) return;
+    removeProgress(type, id, s, e);
+    renderContinueWatching();
+  }
+
   function saveProgress(final) {
     if (!currentMedia) return;
     var video = document.getElementById('hls-video');
@@ -1816,7 +1834,8 @@
         dur: dur,
         t: Date.now(),
         title: currentMedia.item.title || currentMedia.item.name || '',
-        poster: currentMedia.item.poster_path || currentMedia.item.backdrop_path || ''
+        poster: currentMedia.item.poster_path || currentMedia.item.backdrop_path || '',
+        src: sourceCache.sourceTitle || ''
       };
       var keys = Object.keys(map);
       if (keys.length > PROGRESS_MAX) {
@@ -1926,7 +1945,7 @@
     resolveHybridStream(currentMedia.item, 'tv', ref.s, ref.e, 0, true).then(function (data) {
       if (currentPlaybackId !== pid) return;
       if (data && (data.hlsUrl || data.directUrl)) {
-        streamCacheSet('tv', currentMedia.item.id, ref.s, ref.e, data.hlsUrl || data.directUrl, data.source || 'TorBox', !!data.directUrl);
+        streamCacheSet('tv', currentMedia.item.id, ref.s, ref.e, data.hlsUrl || data.directUrl, data.source || 'TorBox', !!data.directUrl, data.sourceTitle || '', data.sourceWarning || '');
       }
     }).catch(function () {}).then(function () {
       prewarmInFlight = false;
@@ -2033,6 +2052,8 @@
               season: sNum,
               episode: eNum,
               imdbId: imdbId,
+              title: item.title || item.name || '',
+              year: (item.release_date || item.first_air_date || '').substring(0, 4),
               streams: streams,
               download: true
             })
@@ -2150,6 +2171,8 @@
       sourceCache.directUrl = cached.direct ? cached.url : null;
       sourceCache.direct = !!cached.direct;
       sourceCache.source = cached.source || 'TorBox';
+      sourceCache.sourceTitle = cached.sourceTitle || '';
+      sourceCache.sourceWarning = cached.sourceWarning || '';
       sourceCache.url = url;
       sourceCache.ready = true;
       sourceCache.warm = true;
@@ -2165,10 +2188,12 @@
       sourceCache.directUrl = data.directUrl || null;
       sourceCache.direct = !!data.directUrl;
       sourceCache.source = data.source || 'TorBox';
+      sourceCache.sourceTitle = data.sourceTitle || '';
+      sourceCache.sourceWarning = data.sourceWarning || '';
       sourceCache.url = url;
       sourceCache.ready = true;
       sourceCache.warm = true;
-      streamCacheSet(type, item.id, sNum, eNum, data.hlsUrl || data.directUrl, data.source || 'TorBox', !!data.directUrl);
+      streamCacheSet(type, item.id, sNum, eNum, data.hlsUrl || data.directUrl, data.source || 'TorBox', !!data.directUrl, data.sourceTitle || '', data.sourceWarning || '');
     }).finally(function () {
       clearTimeout(timeout);
       delete prefetchInFlight[url];
@@ -2230,10 +2255,13 @@
           sourceCache.directUrl = data.directUrl || null;
           sourceCache.direct = !!data.directUrl;
           sourceCache.source = data.source || 'TorBox';
+          sourceCache.sourceTitle = data.sourceTitle || '';
+          sourceCache.sourceWarning = data.sourceWarning || '';
           sourceCache.url = url;
           sourceCache.ready = true;
           sourceCache.warm = false;
-          streamCacheSet(type, item.id, sNum, eNum, data.hlsUrl || data.directUrl, data.source || 'TorBox', !!data.directUrl);
+          streamCacheSet(type, item.id, sNum, eNum, data.hlsUrl || data.directUrl, data.source || 'TorBox', !!data.directUrl, data.sourceTitle || '', data.sourceWarning || '');
+          clearProgressIfSourceChanged(type, item.id, sNum, eNum, data.sourceTitle || '');
           initCustomPlayer(data.hlsUrl || data.directUrl, data.source || 'TorBox', !!data.directUrl);
           resolve();
         }).catch(function (err) {
@@ -2251,6 +2279,7 @@
           if (requestId !== currentStreamRequestId) return;
           sourceCache.warm = true;
           if (sourceCache.ready && (sourceCache.hlsUrl || sourceCache.directUrl) && sourceCache.url === url) {
+            clearProgressIfSourceChanged(type, item.id, sNum, eNum, sourceCache.sourceTitle || '');
             initCustomPlayer(sourceCache.hlsUrl || sourceCache.directUrl, sourceCache.source, sourceCache.direct);
             resolve();
           } else {
@@ -2264,6 +2293,7 @@
 
       if (!forceRefresh && sourceCache.url === url && sourceCache.ready && (sourceCache.hlsUrl || sourceCache.directUrl)) {
         if (requestId !== currentStreamRequestId) return;
+        clearProgressIfSourceChanged(type, item.id, sNum, eNum, sourceCache.sourceTitle || '');
         initCustomPlayer(sourceCache.hlsUrl || sourceCache.directUrl, sourceCache.source, sourceCache.direct);
         resolve(); return;
       }
@@ -2275,9 +2305,12 @@
         sourceCache.directUrl = cached.direct ? cached.url : null;
         sourceCache.direct = !!cached.direct;
         sourceCache.source = cached.source || 'TorBox';
+        sourceCache.sourceTitle = cached.sourceTitle || '';
+        sourceCache.sourceWarning = cached.sourceWarning || '';
         sourceCache.url = url;
         sourceCache.ready = true;
         sourceCache.warm = true;
+        clearProgressIfSourceChanged(type, item.id, sNum, eNum, cached.sourceTitle || '');
         initCustomPlayer(cached.url, cached.source || 'TorBox', !!cached.direct);
         resolve(); return;
       }
@@ -2319,9 +2352,12 @@
         sourceCache.directUrl = warm.direct ? warm.url : null;
         sourceCache.direct = !!warm.direct;
         sourceCache.source = warm.source || 'TorBox';
+        sourceCache.sourceTitle = warm.sourceTitle || '';
+        sourceCache.sourceWarning = warm.sourceWarning || '';
         sourceCache.url = '/api/torbox-source?tmdbId=' + item.id + '&type=movie';
         sourceCache.ready = true;
         sourceCache.warm = true;
+        clearProgressIfSourceChanged('movie', item.id, 1, 1, warm.sourceTitle || '');
         initCustomPlayer(warm.url, warm.source || 'TorBox', !!warm.direct);
       } else {
         showLoader(true, 'Loading stream...');
