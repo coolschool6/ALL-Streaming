@@ -4,7 +4,7 @@
   var API_KEY = 'cd27a14dfc1752e04b474124a5af6d2b';
   var BASE = 'https://api.themoviedb.org/3';
   var IMG = 'https://image.tmdb.org/t/p/';
-  var VIDCORE = 'https://vidcore.org/embed/';
+  var VIDCORE = 'https://vidsrc.sbs/embed/';
 
   var content = document.getElementById('content');
   var loading = document.getElementById('loading');
@@ -15,13 +15,6 @@
   var heroDots = document.getElementById('hero-dots');
   var btnWatch = document.getElementById('btn-watch');
   var btnInfo = document.getElementById('btn-info');
-  var playerModal = document.getElementById('player-modal');
-  var playerIframe = document.getElementById('player-iframe');
-  var playerTitle = document.getElementById('player-title');
-  var playerClose = document.getElementById('player-close');
-  var tvControls = document.getElementById('tv-controls');
-  var seasonSelect = document.getElementById('season-select');
-  var episodeSelect = document.getElementById('episode-select');
   var detailModal = document.getElementById('detail-modal');
   var detailClose = document.getElementById('detail-close');
   var detailBackdrop = document.getElementById('detail-backdrop');
@@ -41,32 +34,82 @@
   var heroInterval = null;
   var currentFilter = 'all';
   var searchTimeout = null;
+  var gridAdCounter = 0;
 
-  /* ===== AD BLOCKING ===== */
-  var _origOpen = window.open.bind(window);
-  window.open = function () { return null; };
-  window.addEventListener('beforeunload', function (e) {
-    if (playerModal && playerModal.classList.contains('active')) {
-      e.preventDefault();
-      e.returnValue = '';
+  /* ===== ADS ===== */
+  var HEADER_BREAKPOINT = 768;
+  var headerResizeTimeout = null;
+
+  function getHeaderAdType() {
+    return window.innerWidth >= HEADER_BREAKPOINT ? 'banner728x90' : 'banner300x250';
+  }
+
+  function renderHeaderAd() {
+    var type = getHeaderAdType();
+    var slot = document.getElementById('ad-header-banner');
+    if (!slot || slot.getAttribute('data-header-type') === type) return;
+    slot.setAttribute('data-header-type', type);
+    if (typeof window.refreshAdSlot === 'function' && slot.getAttribute('data-ad-loaded')) {
+      window.refreshAdSlot('ad-header-banner', type);
+    } else if (typeof window.renderAdSlot === 'function') {
+      window.renderAdSlot('ad-header-banner', type);
     }
-  });
-  document.addEventListener('click', function (e) {
-    var link = e.target.closest('a[target="_blank"]');
-    if (link && !link.closest('.player-modal')) {
-      e.preventDefault();
+  }
+
+  function onHeaderResize() {
+    clearTimeout(headerResizeTimeout);
+    headerResizeTimeout = setTimeout(renderHeaderAd, 150);
+  }
+
+  function initAds() {
+    if (typeof window.renderAdSlots !== 'function') return;
+    renderHeaderAd();
+    window.renderAdSlots([
+      { id: 'ad-home-sponsored', type: 'banner300x250' },
+      { id: 'ad-footer-banner', type: 'banner728x90' }
+    ]);
+    if (typeof window.startAdAutoRefresh === 'function') {
+      window.startAdAutoRefresh('ad-header-banner', getHeaderAdType, 150);
+      window.startAdAutoRefresh('ad-home-sponsored', 'banner300x250', 150);
     }
-  }, true);
-  document.addEventListener('mousedown', function (e) {
-    if (e.target.closest('.player-modal') && !e.target.closest('iframe')) {
-      e.stopPropagation();
+    window.addEventListener('resize', onHeaderResize);
+  }
+
+  function initNativeAd() {
+    if (typeof window.renderAdSlot !== 'function') return;
+    window.renderAdSlot(ADS_CONFIG.nativeBanner.containerId, 'nativeBanner');
+  }
+
+  function initGridAds() {
+    var gridAds = content.querySelectorAll('[data-grid-ad-type]');
+    if (typeof window.IntersectionObserver !== 'function') {
+      for (var i = 0; i < gridAds.length; i++) {
+        window.renderAdSlot(gridAds[i].id, gridAds[i].getAttribute('data-grid-ad-type'));
+      }
+      return;
     }
-  }, true);
-  window.addEventListener('message', function (e) {
-    if (e.data && (e.data === 'open' || (typeof e.data === 'string' && e.data.indexOf('popup') !== -1))) {
-      e.stopImmediatePropagation();
+    var observer = new IntersectionObserver(function (entries) {
+      for (var j = 0; j < entries.length; j++) {
+        if (entries[j].isIntersecting) {
+          var el = entries[j].target;
+          observer.unobserve(el);
+          window.renderAdSlot(el.id, el.getAttribute('data-grid-ad-type'));
+        }
+      }
+    }, { rootMargin: '200px' });
+    for (var k = 0; k < gridAds.length; k++) {
+      observer.observe(gridAds[k]);
     }
-  }, true);
+  }
+
+  function createGridAdSlot() {
+    var slot = document.createElement('div');
+    gridAdCounter++;
+    slot.id = 'ad-grid-slot-' + gridAdCounter;
+    slot.className = 'ad-slot ad-rectangle in-grid-ad';
+    slot.setAttribute('data-grid-ad-type', 'banner300x250');
+    return slot;
+  }
 
   function fetchTMDB(endpoint) {
     var sep = endpoint.indexOf('?') === -1 ? '?' : '&';
@@ -240,6 +283,9 @@
     var displayItems = useTopStyle ? items.slice(0, 10) : items;
 
     for (var i = 0; i < displayItems.length; i++) {
+      if (i > 0 && i % 8 === 0) {
+        track.appendChild(createGridAdSlot());
+      }
       var item = displayItems[i];
       var mediaType = item.media_type || type || 'movie';
 
@@ -371,6 +417,11 @@
 
     detailModal.classList.add('active');
     document.body.style.overflow = 'hidden';
+
+    initNativeAd();
+    if (typeof window.refreshVisibleAds === 'function') {
+      window.refreshVisibleAds();
+    }
   }
 
   function closeDetail() {
@@ -386,7 +437,7 @@
     } else {
       url = VIDCORE + 'movie/' + item.id + '?autoPlay=true';
     }
-    _origOpen(url, '_blank');
+    window.location.href = url;
   }
 
   /* ===== SEARCH ===== */
@@ -496,6 +547,7 @@
   /* ===== INIT ===== */
   function init() {
     loading.style.display = 'flex';
+    initAds();
 
     Promise.all([
       fetchTMDB('/trending/movie/week'),
@@ -537,6 +589,7 @@
 
       content.appendChild(rowsFragment);
 
+      initGridAds();
       setFilter(currentFilter);
     }).catch(function (err) {
       loading.innerHTML = '<div class="search-empty">Failed to load content. Please refresh the page.</div>';
